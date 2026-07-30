@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# logs / stray TS build info (outside dist/)
+*.tsbuildinfo
