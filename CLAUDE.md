@@ -89,6 +89,28 @@ tests/
 `integration/` and later `e2e/` get added the same way, once there's something
 real to test at that level (a Postgres repository, an HTTP flow) — not before.
 
+Shared test doubles/fixtures live in `tests/unit/helpers/`, not nested inside the
+module tree they happen to be used by first — they aren't mirroring a `src/`
+file, they're infrastructure for the tests themselves (parallel to how `common/`
+sits alongside `modules/` in `src/`). Naming there is its own convention,
+deliberately different from `src/`: every file is `camelCase` and ends with
+`Helper`, regardless of whether it exports a class or a function
+(`fakeSearchProfileRepositoryHelper.ts`, `buildSearchProfileHelper.ts`) — no dot
+before the suffix. This is a narrow, intentional exception to the "class files
+are PascalCase" rule: it signals "test helper" at a glance over signaling
+"this exports a class," which matters more inside a helpers folder specifically.
+
+Interfaces shared across `tests/unit/helpers/` live in `tests/unit/interfaces/`
+— scoped to unit tests specifically, not a repo-wide `tests/interfaces/`. One
+file per interface (PascalCase, matching the `src/` convention since these are
+plain `interface` declarations, not helpers), plus a barrel `index.ts`
+re-exporting all of them (`export * from './BuildSearchProfileOverrides'`) —
+consumers import from `../interfaces`, not the individual file. This is the
+only place under `tests/unit/` that uses a barrel; `src/` deliberately doesn't,
+to keep import paths traceable to their real source file. `integration/` and
+`e2e/`, once they exist, get their own `helpers/`/`interfaces/` the same way if
+they need them — not a shared one across test kinds.
+
 Jest config lives in `jest.config.ts` at the **repo root**, not inside `tests/`
 — same tier as `tsconfig.json`/`eslint.config.mjs`/`.prettierrc`, alongside every
 other tool config. Jest's zero-config auto-discovery (`npm run test` → plain

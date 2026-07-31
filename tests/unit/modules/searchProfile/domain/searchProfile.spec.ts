@@ -32,4 +32,38 @@ describe('SearchProfile', () => {
 
     expect(result.isFailure).toBe(true);
   });
+
+  it('trims surrounding whitespace from the name', () => {
+    const result = SearchProfile.create({
+      userId: 'user-1',
+      name: '  Backend Prague  ',
+      preferences: validPreferences(),
+    });
+
+    expect(result.isSuccess).toBe(true);
+    expect(result.value.name).toBe('Backend Prague');
+  });
+
+  it('defaults description to null when omitted', () => {
+    const result = SearchProfile.create({
+      userId: 'user-1',
+      name: 'Backend Prague',
+      preferences: validPreferences(),
+    });
+
+    expect(result.isSuccess).toBe(true);
+    expect(result.value.description).toBeNull();
+  });
+
+  it('keeps the provided description', () => {
+    const result = SearchProfile.create({
+      userId: 'user-1',
+      name: 'Backend Prague',
+      description: 'Remote-friendly backend roles',
+      preferences: validPreferences(),
+    });
+
+    expect(result.isSuccess).toBe(true);
+    expect(result.value.description).toBe('Remote-friendly backend roles');
+  });
 });
