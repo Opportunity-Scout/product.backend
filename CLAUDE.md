@@ -242,6 +242,32 @@ The system must never be designed "from the controllers".
    Search Profile. It's a Domain Service — no side effects, no repository access
    from inside it.
 
+## Security
+
+Every implementation decision has a security angle, not just code that looks
+like "auth" or "crypto" — a new dependency, a new HTTP-exposed endpoint, a new
+input path, a new default config value all count. Weigh it before writing the
+code, not as an afterthought pass at the end. "We have no auth yet" is not a
+reason to skip this: an unauthenticated surface still leaks information and
+still represents a conscious choice about what's exposed, not a non-decision.
+
+**Validate with the user before implementing anything with a real security
+angle** — a new public endpoint, a new dependency, a new default that changes
+what's exposed or trusted — rather than deciding unilaterally and mentioning it
+after the fact. Flag the tradeoff and the reasoning, let the user make the call.
+
+Open items from the first audit (2026-07-31), kept here until acted on:
+- Swagger UI + raw JSON/YAML spec (`/product-backend-api/swagger`, `-json`,
+  `-yaml`) are public with no auth check — fine while nothing is deployed and
+  nothing sensitive is modeled, but must be gated (env check or auth) before
+  any real deployment.
+- No rate limiting, no `helmet`, no explicit CORS config — acceptable for an
+  unauthenticated MVP, revisit before going live.
+- `@nestjs/swagger`'s `js-yaml` dependency has a known DoS advisory
+  (GHSA-pm4m-ph32-ghv5) in its *parsing* path; we only call `jsyaml.dump()` on
+  our own generated document (not reachable through this app as used), but
+  re-check when `@nestjs/swagger` ships a fix upstream.
+
 ## Project structure: feature-first (by bounded context)
 
 ```
