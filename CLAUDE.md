@@ -181,6 +181,26 @@ test fakes) should drop `async` entirely and `return Promise.resolve(value)` —
 that satisfies the interface without tripping
 `@typescript-eslint/require-await`, so no suppression is needed at all.
 
+**Pre-commit hook** (Husky + lint-staged, `.husky/pre-commit` + `.lintstagedrc.json`)
+runs `eslint --fix` on staged `{src,tests}/**/*.ts` files only — same scope as
+`npm run lint`, not the whole repo, so it stays fast. Prettier isn't a separate
+step: `eslint-plugin-prettier` already reports/fixes formatting as an ESLint
+rule, so `eslint --fix` alone covers both. Auto-fixable issues (formatting,
+import order) get fixed and re-staged silently; a real error (e.g. an unused
+variable) aborts the commit with the offending file/line, nothing partially
+staged. Verified both paths directly rather than assuming lint-staged's default
+behavior: committed a deliberately misformatted file (got reformatted and
+committed) and a deliberately unfixable one (commit was blocked, working tree
+reverted to its pre-commit state).
+
+The hook also runs the full unit suite (`npx lint-staged && npm test`) — unit
+tests have no I/O by definition, so they stay fast regardless of how many get
+added, unlike integration/e2e. That's also why integration/e2e never belong in
+a local git hook: **unit** tests run pre-commit (this hook), **integration**
+tests run in CI before deploy, **e2e** tests run in CI after deploy, against
+the actually-deployed app. Each tier gets checked at the point where it's cheap
+to run and still catches what it's meant to catch.
+
 `ValidationPipe` in `main.ts` sets `whitelist: true` **and** `forbidNonWhitelisted: true`
 — unknown body fields get a `400` instead of being silently dropped. Deliberate:
 we're pre-external-clients, so there's no forward-compat reason to tolerate stale

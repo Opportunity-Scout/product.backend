@@ -44,6 +44,7 @@ process memory (data is lost on restart). Everything below runs **locally only**
 - **NestJS** + **TypeScript**, Node **22** (see `.nvmrc` / `engines` in
   `package.json`).
 - **Jest** for tests, **ESLint** (flat config) + **Prettier** for linting/formatting.
+- **Husky + lint-staged** pre-commit hook (lint + unit tests) — see below.
 - **Swagger/OpenAPI** (`@nestjs/swagger`) for interactive API docs.
 - PostgreSQL / Prisma / Redis / BullMQ / Docker are planned but **not wired up
   yet** — added only once a real use case needs them.
@@ -149,3 +150,11 @@ npm run format        # Prettier
 
 Tests live under `tests/unit/`, never next to source files — see `CLAUDE.md` for
 the reasoning and how `integration/`/`e2e/` will be added later.
+
+### Pre-commit hook
+
+Set up automatically by `npm install` (Husky's `prepare` script) — every commit
+runs `eslint --fix` on staged files, then the full unit suite. Auto-fixable
+lint/formatting issues are fixed and re-staged silently; a real lint error or a
+failing test blocks the commit. Integration and e2e tests don't run locally —
+they run in CI (before and after deploy respectively), see `CLAUDE.md`.
