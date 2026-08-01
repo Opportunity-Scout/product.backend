@@ -46,8 +46,11 @@ process memory (data is lost on restart). Everything below runs **locally only**
 - **Jest** for tests, **ESLint** (flat config) + **Prettier** for linting/formatting.
 - **Husky + lint-staged** pre-commit hook (lint + unit tests) — see below.
 - **Swagger/OpenAPI** (`@nestjs/swagger`) for interactive API docs.
-- PostgreSQL / Prisma / Redis / BullMQ / Docker are planned but **not wired up
-  yet** — added only once a real use case needs them.
+- **PostgreSQL + Prisma** (via Docker locally) — schema/migrations in
+  `prisma/`; the domain/application layers don't know it exists (see
+  `CLAUDE.md`).
+- Redis / BullMQ are planned but **not wired up yet** — added only once a real
+  use case needs them.
 
 ## Project structure
 
@@ -86,6 +89,27 @@ module, why interfaces live apart from classes, etc).
 npm install
 ```
 
+### Database (local Postgres via Docker)
+
+```bash
+cp .env.example .env   # only the first time — works as-is, edit values if you need to
+docker compose up -d
+```
+
+Starts a local Postgres container (data persists in a named Docker volume
+across restarts; `docker compose down -v` wipes it for a clean slate). The app
+reads `DATABASE_URL` from `.env`.
+
+```bash
+npm run prisma:migrate   # applies prisma/migrations, prompts for a name on schema changes
+npm run prisma:generate  # regenerates the client into node_modules/@prisma/client (also runs after migrate, and after npm install via prepare)
+npm run prisma:studio    # GUI to browse/edit local data
+```
+
+Schema lives in `prisma/schema.prisma`; the generated client lands in
+`node_modules/@prisma/client`, like any other dependency — nothing generated
+ends up in the repo.
+
 ## Running locally
 
 ```bash
@@ -97,7 +121,7 @@ npm run start
 
 # production-style: compile then run the compiled output
 npm run build
-node dist/main.js
+npm run start:prod
 ```
 
 By default the server listens on port `3000` (override with `PORT=<port>`).

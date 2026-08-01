@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SearchProfileStatus {
+  active
+  paused
+  archived
+}
+
+model SearchProfile {
+  id            String              @id
+  userId        String              @map("user_id")
+  name          String
+  description   String?
+  status        SearchProfileStatus
+  preferences   Json
+  createdAt     DateTime            @map("created_at")
+  updatedAt     DateTime            @map("updated_at")
+  lastMatchedAt DateTime?           @map("last_matched_at")
+
+  @@index([userId])
+  @@map("search_profiles")
+}

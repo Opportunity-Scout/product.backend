@@ -24,8 +24,8 @@ the brand name in every service.
 ## Stack
 
 NestJS, TypeScript, Jest, Node 22 (see `.nvmrc` / `engines` in `package.json`).
-PostgreSQL/Prisma/Redis/BullMQ/Docker — **later**, added only when actually needed,
-not wired up upfront.
+PostgreSQL via Docker + Prisma are wired up (see "Persistence" below). Redis/BullMQ
+— **later**, added only when actually needed, not wired up upfront.
 
 ## Naming conventions
 
@@ -168,7 +168,13 @@ the hard way once. `jest.config.ts` itself is excluded from
 build). `tsBuildInfoFile` is also pinned explicitly to `./dist/tsconfig.build.tsbuildinfo`
 — TypeScript's default location for that cache file shifted once `rootDir`
 became explicit, and it started leaking a build artifact to the repo root
-instead of into `dist/`.
+instead of into `dist/`. Recurred with `prisma.config.ts` and Prisma's
+generated `generated/prisma/*.ts` output — same fix, solved that time by
+excluding both; any future root-level `.ts` file isn't excluded automatically,
+same class of bug will recur (Prisma's client generator now writes into
+`node_modules/@prisma/client` again instead, see "Persistence" below, which
+sidesteps this specific case — but the underlying rule still holds for
+anything else that lands at the repo root).
 
 ## Tooling
 
@@ -201,6 +207,17 @@ tests run in CI before deploy, **e2e** tests run in CI after deploy, against
 the actually-deployed app. Each tier gets checked at the point where it's cheap
 to run and still catches what it's meant to catch.
 
+**Environment variables** (`.env`, e.g. `DATABASE_URL`) are loaded via native
+`--env-file` support, not the `dotenv` package or `@nestjs/config`: Nest CLI's
+own `--env-file .env` flag for `start`/`start:dev` (`npx nest start --help`
+lists it directly), and Node 22's own `--env-file=.env` flag for the compiled
+`start:prod` path. Both were verified to actually populate `process.env` before
+relying on them — `--env-file` is *not* usable via `NODE_OPTIONS` (Node
+explicitly rejects it there), which is why it's passed as a direct CLI flag in
+each npm script instead. No new dependency needed for 3-4 env vars; revisit
+`@nestjs/config` only if real per-environment validation/schemas become
+necessary.
+
 `ValidationPipe` in `main.ts` sets `whitelist: true` **and** `forbidNonWhitelisted: true`
 — unknown body fields get a `400` instead of being silently dropped. Deliberate:
 we're pre-external-clients, so there's no forward-compat reason to tolerate stale
@@ -219,6 +236,76 @@ its own docs path. This is bootstrap/presentation-only concern, same tier as
 enough metadata, so a DTO field without one shows up as an empty/untyped entry in
 the generated schema. When adding a new endpoint/DTO, annotate it the same way,
 and add `@ApiOperation`/`@ApiResponse` on the controller method.
+
+## Persistence
+
+Local Postgres runs via `docker-compose.yml` (single `postgres:18-alpine`
+service). In the real, gitignored `.env`, DB/user/password are all
+`product.backend` — deliberately not `befirst`: "BeFirst" is the product
+brand, this is the backend service's own identifier (same reasoning as the
+Swagger path). Names with a dot were verified to work fine as real Postgres
+identifiers and inside `postgresql://` URIs before committing to them.
+
+`.env.example` (committed) deliberately does **not** mirror those values —
+it uses the generic `postgres`/`postgres`/`postgres` (the universal Docker
+Postgres placeholder convention) so `cp .env.example .env` works out of the
+box with no edits, without baking our specific branded credential pattern
+into a template file. The two are allowed to diverge on purpose: `.env`
+reflects this project's actual local setup, `.env.example` just needs to be
+a safe, functional starting point.
+
+Prisma (`prisma/schema.prisma`) owns the schema and migrations
+(`npm run prisma:migrate` / `prisma:generate` / `prisma:studio`). `preferences`
+(the `SearchPreferences` VO) is stored as one `Json` column, not normalized
+into per-VO tables — nothing queries into its sub-fields at the SQL level yet;
+revisit only when a real query need appears (e.g. Matching Engine). Multi-word
+columns/tables use `@map`/`@@map` to snake_case (`user_id`, `search_profiles`)
+since that's the SQL-side convention, independent of our camelCase TS code.
+
+We're on Prisma **7**, which changed some defaults from earlier versions —
+verified directly rather than assumed, since docs/training data lag reality:
+- The client generator (`provider = "prisma-client"`) emits plain `.ts` source
+  into `generated/prisma/` (gitignored, prisma-managed), not pre-built JS into
+  `node_modules` — importing it from `src/` will hit the same "not under
+  `rootDir`" class of issue `tsconfig.build.json` already guards against.
+  Switched back to `provider = "prisma-client-js"` instead, which still works
+  in v7 and emits into `node_modules/@prisma/client` like every other
+  dependency — no visible generated folder anywhere in the repo, no gitignore
+  entry, no `rootDir` special-casing. Chosen deliberately over the new default:
+  fewer moving parts for a single-package, single-generator project like this
+  one.
+- `datasource.url` now lives in `prisma.config.ts`, not `schema.prisma`.
+  `prisma.config.ts` loads `.env` via Node's native `process.loadEnvFile()`,
+  guarded by `existsSync('.env')` rather than try/catch (empty catch blocks are
+  a smell even with a comment explaining them) — not the `dotenv` package
+  Prisma's own scaffold assumes — consistent with how `.env` is loaded
+  everywhere else in this project (see "Environment variables" above).
+- `PrismaClient` now **requires** a driver adapter (`@prisma/adapter-pg` here)
+  — a bare `DATABASE_URL` string constructor argument is no longer accepted.
+  `pg` itself comes in transitively through the adapter; not a direct
+  dependency of ours.
+
+Migrations (`prisma/migrations/`) are committed to git like any other migration
+tool's output (Rails, Django, Flyway, etc.) — they're the source of truth for
+how the schema evolves, and `prisma migrate deploy` (the production-safe,
+non-interactive apply command) reads them directly at deploy time. The
+timestamp-prefixed folder names (`20260731151557_init`) are Prisma's own
+convention, guaranteeing chronological ordering regardless of who generates a
+migration or on which branch — not something to rename. The `-- CreateTable` /
+`-- CreateIndex` comments inside `migration.sql` are also Prisma-generated;
+migration files are historical records of what was actually applied, not
+hand-curated source, so they're left as generated rather than edited for
+terseness. `migration_lock.toml` (also committed) just pins the datasource
+provider (`postgresql`) so a future accidental switch to a different database
+can't silently mix incompatible migration SQL — same spirit as
+`package-lock.json`, not something to question away.
+
+`npx prisma init` also auto-installed an AI-agent skills bundle
+(`.agents/skills/`, `.claude/skills/`, `.windsurf/skills/`, `skills-lock.json`)
+— official Prisma reference docs, hash-verified, but a third-party content
+bundle landing in the repo unasked is exactly the kind of thing the Security
+section says to flag rather than silently keep. Removed by choice: rely on the
+assistant's own knowledge instead of vendoring ~2200 lines of docs into the repo.
 
 ## Architectural priority
 
