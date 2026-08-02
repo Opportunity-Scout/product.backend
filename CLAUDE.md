@@ -221,6 +221,30 @@ tests run in CI before deploy, **e2e** tests run in CI after deploy, against
 the actually-deployed app. Each tier gets checked at the point where it's cheap
 to run and still catches what it's meant to catch.
 
+**CI** (`.github/workflows/integration-tests.yml`) implements the integration
+tier above: on every push, to any branch, it spins up a real
+`postgres:18-alpine` service container (same image as `docker-compose.yml`),
+`cp .env.example .env` (values already match the service container's
+credentials, so no secrets/templating needed for this non-sensitive
+local-only Postgres), runs `prisma migrate deploy` (the non-interactive apply
+command — see "Persistence"), then `npm run test:integration`. Deliberately
+`push` only, no `pull_request` trigger: GitHub already surfaces a
+push-triggered run against a branch's own HEAD commit as a check on any PR
+containing that commit (matched by SHA), so a separate `pull_request` trigger
+on the same commit would just run the workflow twice — real cost only in
+noise/wait time even though public-repo Actions minutes are free. The
+tradeoff being given up: `pull_request` tests GitHub's synthetic
+merge-of-head-into-base commit, not just the branch's own HEAD, so it can
+catch "these two branches individually pass but conflict/break once merged"
+— not worth it yet for a solo-dev repo with no long-lived branches; revisit
+if that changes. `HUSKY=0` at job level skips the Husky install step during
+`npm ci`, since a CI runner has no git hooks to wire up. `permissions:
+contents: read` at workflow level — least privilege for the default
+`GITHUB_TOKEN`, since nothing in this workflow needs to write back to the
+repo or call the GitHub API. Branch protection requiring this check to pass
+before merging into `main` is a manual GitHub repo-settings step, not
+something committed to this repo — not yet turned on.
+
 **Environment variables** (`.env`, e.g. `DATABASE_URL`) are loaded via native
 `--env-file` support, not the `dotenv` package or `@nestjs/config`: Nest CLI's
 own `--env-file .env` flag for `start`/`start:dev` (`npx nest start --help`
