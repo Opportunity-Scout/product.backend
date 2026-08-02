@@ -41,6 +41,10 @@ export class SearchProfile {
     );
   }
 
+  static reconstitute(props: SearchProfileProps): SearchProfile {
+    return new SearchProfile(props);
+  }
+
   get id(): string {
     return this.props.id;
   }
