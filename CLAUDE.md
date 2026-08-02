@@ -88,6 +88,20 @@ tests/
 
 `integration/` and later `e2e/` get added the same way, once there's something
 real to test at that level (a Postgres repository, an HTTP flow) — not before.
+`integration/` now exists: it boots the real `AppModule` (real `PrismaModule`,
+real `PrismaSearchProfileAdapter`) via `@nestjs/testing`, drives it over HTTP
+with `supertest`, and verifies the row actually landed in Postgres using a
+second, independently-constructed `PrismaClient` — not the app's own DI
+instance — so the assertion can't pass just because the app is holding onto
+the same in-memory object. Run via `npm run test:integration`, which needs the
+Docker Postgres container up and migrated first (same `.env` as the app) and
+loads it the same `--env-file` way as `start`/`start:prod` (see "Environment
+variables" below) since plain `jest` doesn't read `.env` on its own. `test:unit`,
+`test:unit:watch`, `test:integration` are named explicitly per tier —
+deliberately no bare `test`/`test:watch` alias, since npm's reserved `test`
+script name says nothing about *which* suite runs once more than one exists.
+The pre-commit hook (see "Pre-commit hook" below) calls `test:unit` by name,
+so it never accidentally requires Postgres to be running.
 
 Shared test doubles/fixtures live in `tests/unit/helpers/`, not nested inside the
 module tree they happen to be used by first — they aren't mirroring a `src/`
@@ -113,9 +127,9 @@ they need them — not a shared one across test kinds.
 
 Jest config lives in `jest.config.ts` at the **repo root**, not inside `tests/`
 — same tier as `tsconfig.json`/`eslint.config.mjs`/`.prettierrc`, alongside every
-other tool config. Jest's zero-config auto-discovery (`npm run test` → plain
-`jest`) only looks at the project root by default; nesting the config under
-`tests/` would mean every invocation needs an explicit `--config` flag, and
+other tool config. Jest's zero-config auto-discovery only looks at the project
+root by default; nesting the config under `tests/` would mean every invocation
+needs an explicit `--config` flag, and
 `rootDir` would need to escape back out to reach `src/` (`rootDir: '..'`) since
 `src/` isn't inside `tests/`.
 
@@ -182,8 +196,8 @@ ESLint (flat config, `typescript-eslint` + `eslint-plugin-prettier`) and Prettie
 are set up from day one — `npm run lint` / `npm run format`. Config lives in
 `eslint.config.mjs` / `.prettierrc`. Avoid `eslint-disable` comments where a real
 code fix exists: e.g. a repository method implementing an async port
-(`Promise<T>`) but with nothing to actually `await` (`InMemorySearchProfileRepository`,
-test fakes) should drop `async` entirely and `return Promise.resolve(value)` —
+(`Promise<T>`) but with nothing to actually `await` (`FakeSearchProfileRepository`
+in `tests/unit/helpers/`) should drop `async` entirely and `return Promise.resolve(value)` —
 that satisfies the interface without tripping
 `@typescript-eslint/require-await`, so no suppression is needed at all.
 
@@ -199,7 +213,7 @@ behavior: committed a deliberately misformatted file (got reformatted and
 committed) and a deliberately unfixable one (commit was blocked, working tree
 reverted to its pre-commit state).
 
-The hook also runs the full unit suite (`npx lint-staged && npm test`) — unit
+The hook also runs the full unit suite (`npx lint-staged && npm run test:unit`) — unit
 tests have no I/O by definition, so they stay fast regardless of how many get
 added, unlike integration/e2e. That's also why integration/e2e never belong in
 a local git hook: **unit** tests run pre-commit (this hook), **integration**
@@ -284,6 +298,39 @@ verified directly rather than assumed, since docs/training data lag reality:
   — a bare `DATABASE_URL` string constructor argument is no longer accepted.
   `pg` itself comes in transitively through the adapter; not a direct
   dependency of ours.
+
+`PrismaService` (`src/common/persistence/PrismaService.ts`) extends
+`PrismaClient` directly (the officially-documented Nest+Prisma pattern),
+constructing the `PrismaPg` driver adapter itself and hooking `$connect`/
+`$disconnect` into `OnModuleInit`/`OnModuleDestroy`. `PrismaModule` wraps and
+exports it — deliberately not `@Global()`, kept explicit like every other
+module wiring in this project; importing modules still get the same singleton
+instance regardless, that's standard Nest DI, not something `@Global()` is
+needed for.
+
+Port implementations follow a `<Technology><PortName>Adapter` naming pattern —
+`PrismaSearchProfileAdapter` (real Postgres, `infrastructure/persistence/`),
+test doubles are `Fake<PortName>Repository` in `tests/unit/helpers/` (see
+"Testing"). "Repository" is reserved for the port interface itself
+(`SearchProfileRepository`); concrete implementations are always "Adapter" —
+chosen deliberately over reusing "Repository" on the concrete class too, to
+keep "the contract" and "an implementation of it" visually distinct at a
+glance. `preferences` crosses the port boundary as `Prisma.InputJsonValue`; the
+domain-side `SearchPreferencesProps` shape gets built as a plain object first,
+then cast (`as unknown as Prisma.InputJsonValue`) — Prisma's generated `Json`
+input type structurally requires an index signature that a concrete `interface`
+never has, so some cast at that specific boundary is unavoidable, not a sign of
+an unsafe shortcut elsewhere.
+
+Reading a row back goes through `SearchProfile.reconstitute()`
+(`domain/SearchProfile.ts`), a second factory next to `create()` — `create()`
+generates a fresh `id` and is where creation-time validation belongs;
+`reconstitute()` takes a full, already-valid `SearchProfileProps` (including an
+existing `id`) straight from a trusted source (our own Postgres row) and skips
+re-deriving anything `create()` would compute. `SearchPreferences.create()` is
+still run on the row's `preferences` JSON before handing it to
+`reconstitute()`, since VO-level validation isn't re-derivable the way an `id`
+is — a corrupted or hand-edited row should still fail loudly.
 
 Migrations (`prisma/migrations/`) are committed to git like any other migration
 tool's output (Rails, Django, Flyway, etc.) — they're the source of truth for
@@ -505,8 +552,9 @@ POST /search-profiles
   → CreateSearchProfile Use Case
   → SearchProfile Domain Entity
   → SearchProfileRepository (interface)
-  → InMemorySearchProfileRepository
+  → PrismaSearchProfileAdapter → Postgres
   → 201 Created
 ```
 
-No PostgreSQL, no Telegram, no DOU.
+Real PostgreSQL persistence is wired up (see "Persistence"). Still no
+Telegram, no DOU.

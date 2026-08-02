@@ -23,8 +23,8 @@ just "how do I run this thing."
 
 ## Current state: Walking Skeleton
 
-Only one vertical slice exists so far — creating a Search Profile, stored
-in-memory:
+Only one vertical slice exists so far — creating a Search Profile, persisted
+in a real local Postgres:
 
 ```
 POST /search-profiles
@@ -32,12 +32,11 @@ POST /search-profiles
   → CreateSearchProfileUseCase
   → SearchProfile (domain entity) + SearchPreferences (composite Value Object)
   → SearchProfileRepository (port)
-  → InMemorySearchProfileRepository (adapter)
+  → PrismaSearchProfileAdapter (adapter) → Postgres
   → 201 Created
 ```
 
-No PostgreSQL, no Telegram, no DOU integration yet, and no persistence beyond
-process memory (data is lost on restart). Everything below runs **locally only**.
+No Telegram, no DOU integration yet. Everything below runs **locally only**.
 
 ## Stack
 
@@ -61,15 +60,18 @@ src/
   AppModule.ts
   common/
     kernel/                   Result, DomainError — base building blocks for the domain layer
+    persistence/              PrismaService, PrismaModule — shared Prisma wiring
   modules/
     searchProfile/
       domain/                 SearchProfile entity, SearchPreferences + Value Objects, no framework deps
       application/             Use cases + repository port (interface)
-      infrastructure/          InMemorySearchProfileRepository
+      infrastructure/          PrismaSearchProfileAdapter
       presentation/             Controller, DTO, response presenter
 
 tests/
   unit/                       Mirrors the src/ path of whatever it tests
+    modules/searchProfile/...
+  integration/                 Boots the real app + a real Postgres, drives it over HTTP
     modules/searchProfile/...
 ```
 
@@ -162,18 +164,31 @@ part of `preferences`, and within it only `remote` is mandatory (`relocation`
 defaults to `false` when omitted; if `remote` is `false`, at least one `country`
 is required) — everything else is optional.
 
+### Stopping / cleanup
+
+- `Ctrl+C` in the terminal running `npm run start:dev` (and `npm run
+  prisma:studio`, if you opened it).
+- `docker compose down` — stops and removes the Postgres container; data
+  stays in the named Docker volume for next time.
+- `docker compose down -v` — also wipes that volume, for a completely clean
+  slate.
+
 ## Testing, linting, formatting
 
 ```bash
-npm run test         # unit tests (Jest)
-npm run test:watch
+npm run test:unit         # unit tests (Jest), no I/O, no Postgres needed
+npm run test:unit:watch
+
+npm run test:integration  # boots the real app against Postgres — needs
+                           # `docker compose up -d` + migrations applied first
 
 npm run lint          # ESLint, auto-fixes what it can
 npm run format        # Prettier
 ```
 
-Tests live under `tests/unit/`, never next to source files — see `CLAUDE.md` for
-the reasoning and how `integration/`/`e2e/` will be added later.
+Tests live under `tests/`, never next to source files, split by kind
+(`unit/`, `integration/`, later `e2e/`) mirroring the `src/` path of whatever
+they test — see `CLAUDE.md` for the reasoning.
 
 ### Pre-commit hook
 
