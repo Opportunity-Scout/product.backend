@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "Product Backend API",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "engines": {
     "node": "^22"
   },

@@ -197,3 +197,16 @@ runs `eslint --fix` on staged files, then the full unit suite. Auto-fixable
 lint/formatting issues are fixed and re-staged silently; a real lint error or a
 failing test blocks the commit. Integration and e2e tests don't run locally —
 they run in CI (before and after deploy respectively), see `CLAUDE.md`.
+
+### CI
+
+[`.github/workflows/integration-tests.yml`](./.github/workflows/integration-tests.yml)
+runs `test:integration` against a real Postgres service container on every
+push, to any branch — see `CLAUDE.md` for why there's no separate
+`pull_request` trigger.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](./LICENSE) — free to view, run locally, and
+modify for noncommercial purposes. Commercial use requires a separate
+agreement with the licensor.
