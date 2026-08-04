@@ -73,4 +73,52 @@ describe('PrismaSearchProfileAdapter', () => {
 
     await expect(adapter.findById('corrupted-id')).rejects.toThrow();
   });
+
+  it('returns all search profiles for a user id', async () => {
+    const fakePrisma = buildFakePrismaService();
+    const now = new Date('2026-01-01T00:00:00.000Z');
+
+    fakePrisma.searchProfile.findMany.mockResolvedValue([
+      {
+        id: 'profile-1',
+        userId: 'user-1',
+        name: 'Backend Prague',
+        description: null,
+        status: 'active',
+        preferences: { location: { remote: true, relocation: false } },
+        createdAt: now,
+        updatedAt: now,
+        lastMatchedAt: null,
+      },
+      {
+        id: 'profile-2',
+        userId: 'user-1',
+        name: 'Frontend Berlin',
+        description: null,
+        status: 'paused',
+        preferences: { location: { remote: true, relocation: false } },
+        createdAt: now,
+        updatedAt: now,
+        lastMatchedAt: null,
+      },
+    ]);
+
+    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const found = await adapter.findAllByUserId('user-1');
+    const call = fakePrisma.searchProfile.findMany.mock.calls[0][0];
+
+    expect(call.where).toEqual({ userId: 'user-1' });
+    expect(found).toHaveLength(2);
+    expect(found[0].id).toBe('profile-1');
+    expect(found[1].id).toBe('profile-2');
+  });
+
+  it('returns an empty array when the user has no search profiles', async () => {
+    const fakePrisma = buildFakePrismaService();
+    fakePrisma.searchProfile.findMany.mockResolvedValue([]);
+    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const found = await adapter.findAllByUserId('user-without-profiles');
+
+    expect(found).toEqual([]);
+  });
 });

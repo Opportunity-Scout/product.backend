@@ -1,13 +1,43 @@
-import { BadRequestException, Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  NotFoundException,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { CreateSearchProfileUseCase } from '../application/createSearchProfile/CreateSearchProfileUseCase';
+import { GetSearchProfileUseCase } from '../application/getSearchProfile/GetSearchProfileUseCase';
+import { ListSearchProfilesUseCase } from '../application/listSearchProfiles/ListSearchProfilesUseCase';
+import { PauseSearchProfileUseCase } from '../application/pauseSearchProfile/PauseSearchProfileUseCase';
+import { ActivateSearchProfileUseCase } from '../application/activateSearchProfile/ActivateSearchProfileUseCase';
+import { ArchiveSearchProfileUseCase } from '../application/archiveSearchProfile/ArchiveSearchProfileUseCase';
+import { UpdateSearchProfileUseCase } from '../application/updateSearchProfile/UpdateSearchProfileUseCase';
+import { SearchProfileNotFoundError } from '../application/errors/SearchProfileNotFoundError';
 import { CreateSearchProfileDto } from './dto/CreateSearchProfileDto';
+import { ListSearchProfilesQueryDto } from './dto/ListSearchProfilesQueryDto';
+import { UpdateSearchProfileDto } from './dto/UpdateSearchProfileDto';
 import { toSearchProfileResponse } from './searchProfilePresenter';
 
 @ApiTags('search-profiles')
 @Controller('search-profiles')
 export class SearchProfilesController {
-  constructor(private readonly createSearchProfileUseCase: CreateSearchProfileUseCase) {}
+  constructor(
+    private readonly createSearchProfileUseCase: CreateSearchProfileUseCase,
+    private readonly getSearchProfileUseCase: GetSearchProfileUseCase,
+    private readonly listSearchProfilesUseCase: ListSearchProfilesUseCase,
+    private readonly pauseSearchProfileUseCase: PauseSearchProfileUseCase,
+    private readonly activateSearchProfileUseCase: ActivateSearchProfileUseCase,
+    private readonly archiveSearchProfileUseCase: ArchiveSearchProfileUseCase,
+    private readonly updateSearchProfileUseCase: UpdateSearchProfileUseCase,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -26,6 +56,119 @@ export class SearchProfilesController {
     });
 
     if (result.isFailure) {
+      throw new BadRequestException(result.error.message);
+    }
+
+    return toSearchProfileResponse(result.value);
+  }
+
+  @Get()
+  @ApiOperation({ summary: "List a user's Search Profiles" })
+  @ApiResponse({ status: 200, description: "The user's Search Profiles (possibly empty)" })
+  async list(@Query() query: ListSearchProfilesQueryDto) {
+    const searchProfiles = await this.listSearchProfilesUseCase.execute({ userId: query.userId });
+
+    return searchProfiles.map(toSearchProfileResponse);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a Search Profile by id' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Search Profile found' })
+  @ApiResponse({ status: 400, description: 'Malformed id' })
+  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  async findById(@Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.getSearchProfileUseCase.execute({ id });
+
+    if (result.isFailure) {
+      throw new NotFoundException(result.error.message);
+    }
+
+    return toSearchProfileResponse(result.value);
+  }
+
+  @Post(':id/pause')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Pause a Search Profile' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Search Profile paused' })
+  @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is not active' })
+  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  async pause(@Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.pauseSearchProfileUseCase.execute({ id });
+
+    if (result.isFailure) {
+      if (result.error instanceof SearchProfileNotFoundError) {
+        throw new NotFoundException(result.error.message);
+      }
+
+      throw new BadRequestException(result.error.message);
+    }
+
+    return toSearchProfileResponse(result.value);
+  }
+
+  @Post(':id/activate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Activate a paused Search Profile' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Search Profile activated' })
+  @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is not paused' })
+  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  async activate(@Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.activateSearchProfileUseCase.execute({ id });
+
+    if (result.isFailure) {
+      if (result.error instanceof SearchProfileNotFoundError) {
+        throw new NotFoundException(result.error.message);
+      }
+
+      throw new BadRequestException(result.error.message);
+    }
+
+    return toSearchProfileResponse(result.value);
+  }
+
+  @Post(':id/archive')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Archive a Search Profile' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Search Profile archived' })
+  @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is already archived' })
+  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  async archive(@Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.archiveSearchProfileUseCase.execute({ id });
+
+    if (result.isFailure) {
+      if (result.error instanceof SearchProfileNotFoundError) {
+        throw new NotFoundException(result.error.message);
+      }
+
+      throw new BadRequestException(result.error.message);
+    }
+
+    return toSearchProfileResponse(result.value);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update a Search Profile' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiResponse({ status: 200, description: 'Search Profile updated' })
+  @ApiResponse({ status: 400, description: 'Malformed id, invalid name, or invalid preferences' })
+  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSearchProfileDto) {
+    const result = await this.updateSearchProfileUseCase.execute({
+      id,
+      name: dto.name,
+      description: dto.description,
+      preferences: dto.preferences,
+    });
+
+    if (result.isFailure) {
+      if (result.error instanceof SearchProfileNotFoundError) {
+        throw new NotFoundException(result.error.message);
+      }
+
       throw new BadRequestException(result.error.message);
     }
 

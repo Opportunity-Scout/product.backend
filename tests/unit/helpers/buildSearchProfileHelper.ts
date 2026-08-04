@@ -11,7 +11,7 @@ export function buildSearchProfile(overrides: BuildSearchProfileOverrides = {}):
   }
 
   const profileResult = SearchProfile.create({
-    userId: 'user-1',
+    userId: overrides.userId ?? 'user-1',
     name: overrides.name ?? 'Backend Prague',
     description: overrides.description,
     preferences: preferencesResult.value,

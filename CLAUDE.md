@@ -58,13 +58,24 @@ PostgreSQL via Docker + Prisma are wired up (see "Persistence" below). Redis/Bul
     `SearchProfileProps` (used only inside `SearchProfile.ts`) lives in
     `domain/interfaces/SearchProfileProps.ts`. Consistency of "logic here,
     contracts there" wins over the small ceremony of one extra file.
-- Small validation errors owned by exactly one class stay co-located in that
-  class's file too (e.g. `InvalidSearchProfileNameError` inside `SearchProfile.ts`,
-  `LocationRequiresCountryError` inside `LocationFilter.ts`), the same way the
-  Value Objects already do it — these are logic (classes), not contracts, so the
-  interfaces-separation rule above doesn't apply to them. Only split into their
-  own file once a file would need to pick between multiple unrelated exports for
-  its name.
+- Error classes (`extends DomainError`) live in their own sibling `errors/`
+  folder, one file per class, PascalCase matching the class name — same tier
+  as the `interfaces/`/`types/` folders above
+  (`domain/errors/InvalidSearchProfileNameError.ts`,
+  `domain/errors/InvalidSearchProfileStatusTransitionError.ts`,
+  `domain/valueObjects/errors/LocationRequiresCountryError.ts`,
+  `domain/valueObjects/errors/NegativeSalaryError.ts`,
+  `application/errors/SearchProfileNotFoundError.ts`). Previously these were
+  co-located inside the one class's file that raised them (e.g.
+  `InvalidSearchProfileNameError` inside `SearchProfile.ts`), on the
+  reasoning that an error owned by exactly one class is still logic, not a
+  contract, so the interfaces-separation rule didn't apply to it. Revisited
+  once `SearchProfileNotFoundError` needed its own file anyway — it's raised
+  by every use case that looks up a `SearchProfile` by id, not owned by one
+  class — since applying one uniform rule to every error (its own file,
+  regardless of how many places raise it) is simpler than deciding per error
+  whether it's "owned by exactly one class" today and might need moving
+  later.
 - Exception: `main.ts` stays lowercase — it's a bootstrap script, not a class.
 - HTTP route paths stay kebab-case (`@Controller('search-profiles')`) — that's a
   URL convention, unrelated to file/identifier naming.
@@ -356,6 +367,24 @@ still run on the row's `preferences` JSON before handing it to
 `reconstitute()`, since VO-level validation isn't re-derivable the way an `id`
 is — a corrupted or hand-edited row should still fail loudly.
 
+Row↔domain mapping for an adapter (`toDomain`, `toPersistenceJson`) lives in
+its own file once there's more than one such function — `PrismaSearchProfileAdapter`
+has both, so they live in `infrastructure/persistence/helpers/prismaSearchProfileMapperHelper.ts`,
+named like the `tests/unit/helpers/*Helper.ts` convention (camelCase file,
+ends in `Helper`) even though this one's in `src/`, not `tests/`: same
+reasoning applies — it signals "supporting code for the thing next to it,"
+not "the thing itself." The file exports a class instance
+(`export const prismaSearchProfileMapper = new PrismaSearchProfileMapper()`),
+not the class or `static` methods — deliberately, because the class holds no
+state, so one shared instance is simpler to call (`prismaSearchProfileMapper.toDomain(row)`)
+than either `new`-ing it at every call site or reaching for `static`. This
+singleton-instance pattern is specifically for stateless mapper/utility
+classes — it does not generalize to every helper: `FakeSearchProfileRepository`
+in `tests/unit/helpers/`, for instance, must stay a class instantiated fresh
+per test (`new FakeSearchProfileRepository()`), since it holds real
+per-test state (`saved: SearchProfile[]`) that a shared instance would leak
+across tests.
+
 Migrations (`prisma/migrations/`) are committed to git like any other migration
 tool's output (Rails, Django, Flyway, etc.) — they're the source of truth for
 how the schema evolves, and `prisma migrate deploy` (the production-safe,
@@ -425,6 +454,39 @@ Open items from the first audit (2026-07-31), kept here until acted on:
   (GHSA-pm4m-ph32-ghv5) in its *parsing* path; we only call `jsyaml.dump()` on
   our own generated document (not reachable through this app as used), but
   re-check when `@nestjs/swagger` ships a fix upstream.
+- **`GET /search-profiles?userId=...`** (added 2026-08-04) trusts `userId` as
+  a bare client-supplied query param, with no `User`/auth entity yet to check
+  it against the actual caller. This is a real escalation over `GET /:id`
+  (which requires knowing an unguessable `randomUUID()`), not an equivalent
+  gap: anyone who knows/guesses a `userId` can list **all** of that user's
+  Search Profiles — including `compensation.minimumSalary`, `companies`,
+  `location` — and can probe whether a given `userId` has any profiles at
+  all (enumeration). Discussed explicitly on 2026-08-04 (should have been
+  flagged *before* implementing, per this section's own rule about new
+  public endpoints — it wasn't, and got caught in review instead). The
+  endpoint itself is a real product need (a user has multiple Search
+  Profiles; "list mine" is basic, not optional), so the fix isn't removing
+  it — it's that once `User`/auth exists, this endpoint must derive `userId`
+  from the authenticated caller (or verify the query param against it)
+  instead of trusting the query param outright. **Hard blocker: must be
+  closed before any real deployment**, same bar as the Swagger-gating item
+  above — not "nice to have, revisit eventually."
+- **`POST /search-profiles/:id/pause`** (added 2026-08-04, same gap applies
+  to the `activate`/`archive`/`PATCH` endpoints that followed it) trusts the
+  caller to be the profile's owner, with no `User`/auth entity yet to check
+  it against. Lower severity than the `GET ?userId=...` item above — `id` is
+  an unguessable `randomUUID()`, not a client-chosen string, so this isn't an
+  enumeration vector — but it's a **write**, not a read: anyone who obtains a
+  profile's id (a leaked log line, a shared link, a future "share your
+  search" feature) could pause someone else's active search — or, via
+  `PATCH`, silently rewrite their `preferences`/`name`/`description` — without
+  their consent, not just read their data. Same resolution as the `list`
+  item: accepted for now under the MVP's no-auth posture, not a reason to
+  remove the endpoint, but must derive/verify the caller's identity once
+  `User`/auth exists — tracked here specifically so it doesn't get missed
+  again the way it did the first time around (flagged in review, not
+  before implementing,
+  per this section's own rule).
 
 ## Project structure: feature-first (by bounded context)
 
@@ -458,6 +520,18 @@ Skeleton). The other modules are agreed-upon boundaries, no files yet.
 
 Ports (repository/adapter interfaces) live in `application/<module>/ports/`,
 implementations live in `infrastructure/<module>/`.
+
+**This file stays a single root `CLAUDE.md`, not split per-directory, until
+there's a real reason to** — same "not before it's needed" reasoning as
+Redis/BullMQ above. Splitting now would just scatter today's cross-cutting
+sections (naming, testing tiers, security) across files that would all need
+to reference each other anyway, since there's only one real module so far.
+Revisit once either holds: (a) a second module (`source`, `opportunity`, ...)
+exists with genuinely divergent local conventions (e.g. `source`'s
+DOU-parsing adapters needing their own rules), or (b) this root file gets
+big/noisy enough that someone working in one narrow area (e.g. only
+`tests/`) has to wade through unrelated product/domain sections to find what
+they need.
 
 ## Domain
 
@@ -512,6 +586,21 @@ as far as generalizing goes for now. Revisit this — likely by making
 `preferences` type-specific per Opportunity type (e.g. `JobPreferences` vs
 `VisaPreferences`) rather than one fixed shape — when a second real Opportunity
 type is actually being designed, not before.
+
+**Known, deliberate asymmetry (2026-08-04):** `SearchProfile.updateDetails()`'s
+`name` handling has a runtime guard (`input.name?.trim()`) against a caller
+passing `null` outside the validated DTO/HTTP path — same reasoning as
+`SearchProfile.create()`. `SearchPreferences.create()`, called from
+`UpdateSearchProfileUseCase` for the `preferences` field, has no equivalent
+guard — passing `null` there throws a raw `TypeError`, not a `Result.fail`.
+Not fixed, on purpose: the only current caller is already unreachable with
+`null` because `UpdateSearchProfileDto`'s `@ValidateIf` rejects it before the
+use case ever runs, and hardening `SearchPreferences.create()` itself would
+mean either inventing a new error class for a scenario nothing can currently
+trigger, or cascading defensive `?.` through every nested VO it calls into
+(`LocationFilter`, `SalaryExpectation`, ...) — real cost for zero live risk.
+Revisit if a second caller ever constructs `SearchPreferencesProps` outside
+the NestJS DTO/ValidationPipe path (e.g. a CLI import script).
 
 ### Domain Events
 

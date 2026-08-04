@@ -5,6 +5,7 @@ export function buildFakePrismaService(): FakePrismaService {
     searchProfile: {
       upsert: jest.fn<Promise<unknown>, [UpsertArgs]>(),
       findUnique: jest.fn<Promise<unknown>, [{ where: { id: string } }]>(),
+      findMany: jest.fn<Promise<unknown>, [{ where: { userId: string } }]>(),
     },
   };
 }

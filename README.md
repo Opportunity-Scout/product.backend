@@ -23,8 +23,8 @@ just "how do I run this thing."
 
 ## Current state: Walking Skeleton
 
-Only one vertical slice exists so far — creating a Search Profile, persisted
-in a real local Postgres:
+Search Profiles are persisted in a real local Postgres, through the same
+layered flow for every endpoint:
 
 ```
 POST /search-profiles
@@ -35,6 +35,17 @@ POST /search-profiles
   → PrismaSearchProfileAdapter (adapter) → Postgres
   → 201 Created
 ```
+
+These endpoints exist so far:
+
+- `POST /search-profiles` — create.
+- `GET /search-profiles/:id` — read one.
+- `GET /search-profiles?userId=...` — list a user's Search Profiles.
+- `PATCH /search-profiles/:id` — update `name`/`description`/`preferences`.
+  Omitted fields are left unchanged; `description: null` explicitly clears
+  it; `preferences`, if sent, fully replaces the existing value.
+- `POST /search-profiles/:id/pause` / `/activate` / `/archive` — status
+  transitions (`active` → `paused` → `active`, either → `archived`).
 
 No Telegram, no DOU integration yet. Everything below runs **locally only**.
 
@@ -65,7 +76,7 @@ src/
     searchProfile/
       domain/                 SearchProfile entity, SearchPreferences + Value Objects, no framework deps
       application/             Use cases + repository port (interface)
-      infrastructure/          PrismaSearchProfileAdapter
+      infrastructure/          PrismaSearchProfileAdapter (+ persistence/helpers/ mapper)
       presentation/             Controller, DTO, response presenter
 
 tests/
@@ -163,6 +174,32 @@ Expect a `201` with the created Search Profile. `location` is the only required
 part of `preferences`, and within it only `remote` is mandatory (`relocation`
 defaults to `false` when omitted; if `remote` is `false`, at least one `country`
 is required) — everything else is optional.
+
+```bash
+curl http://localhost:3000/search-profiles/<id-from-the-response-above>
+
+curl "http://localhost:3000/search-profiles?userId=user-1"
+```
+
+The first returns that one Search Profile (`404` if the id doesn't exist,
+`400` if it's not a valid UUID); the second returns every Search Profile for
+that `userId` (`400` if `userId` is missing, `[]` if the user has none).
+
+```bash
+curl -X PATCH http://localhost:3000/search-profiles/<id> \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Senior Backend Prague", "description": null }'
+
+curl -X POST http://localhost:3000/search-profiles/<id>/pause
+curl -X POST http://localhost:3000/search-profiles/<id>/activate
+curl -X POST http://localhost:3000/search-profiles/<id>/archive
+```
+
+`PATCH` only touches fields present in the body — omit a field to leave it
+unchanged, send `description: null` to clear it, send `preferences` to fully
+replace it. The status endpoints enforce legal transitions only
+(`pause` needs `active`, `activate` needs `paused`, `archive` accepts either)
+— an illegal one (e.g. pausing an already-paused profile) is a `400`.
 
 ### Stopping / cleanup
 
