@@ -1,12 +1,6 @@
 import { Result } from '@app/common/kernel/Result';
-import { DomainError } from '@app/common/kernel/DomainError';
 import { SalaryExpectationProps } from './interfaces/SalaryExpectationProps';
-
-export class NegativeSalaryError extends DomainError {
-  constructor() {
-    super('Minimum salary cannot be negative');
-  }
-}
+import { NegativeSalaryError } from './errors/NegativeSalaryError';
 
 export class SalaryExpectation {
   private constructor(

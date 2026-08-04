@@ -1,12 +1,6 @@
 import { Result } from '@app/common/kernel/Result';
-import { DomainError } from '@app/common/kernel/DomainError';
 import { LocationFilterProps } from './interfaces/LocationFilterProps';
-
-export class LocationRequiresCountryError extends DomainError {
-  constructor() {
-    super('At least one country is required when remote is false');
-  }
-}
+import { LocationRequiresCountryError } from './errors/LocationRequiresCountryError';
 
 export class LocationFilter {
   private constructor(
