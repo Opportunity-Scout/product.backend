@@ -15,7 +15,7 @@ export class GetSearchProfileUseCase {
   async execute(input: GetSearchProfileInput): Promise<Result<SearchProfile, SearchProfileNotFoundError>> {
     const searchProfile = await this.searchProfileRepository.findById(input.id);
 
-    if (!searchProfile) {
+    if (!searchProfile || searchProfile.userId !== input.userId) {
       return Result.fail(new SearchProfileNotFoundError(input.id));
     }
 

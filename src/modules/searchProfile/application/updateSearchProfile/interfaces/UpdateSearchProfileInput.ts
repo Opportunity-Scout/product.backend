@@ -2,6 +2,7 @@ import { SearchPreferencesProps } from '../../../domain/interfaces/SearchPrefere
 
 export interface UpdateSearchProfileInput {
   id: string;
+  userId: string;
   name?: string;
   description?: string | null;
   preferences?: SearchPreferencesProps;

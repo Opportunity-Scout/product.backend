@@ -12,6 +12,15 @@ enum SearchProfileStatus {
   archived
 }
 
+model User {
+  id               String   @id
+  telegramUserId   String   @unique @map("telegram_user_id")
+  telegramUsername String?  @map("telegram_username")
+  createdAt        DateTime @map("created_at")
+
+  @@map("users")
+}
+
 model SearchProfile {
   id            String              @id
   userId        String              @map("user_id")

@@ -18,7 +18,7 @@ export class ArchiveSearchProfileUseCase {
   ): Promise<Result<SearchProfile, SearchProfileNotFoundError | InvalidSearchProfileStatusTransitionError>> {
     const searchProfile = await this.searchProfileRepository.findById(input.id);
 
-    if (!searchProfile) {
+    if (!searchProfile || searchProfile.userId !== input.userId) {
       return Result.fail(new SearchProfileNotFoundError(input.id));
     }
 
