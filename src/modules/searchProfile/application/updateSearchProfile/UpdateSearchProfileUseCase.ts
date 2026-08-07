@@ -19,7 +19,7 @@ export class UpdateSearchProfileUseCase {
   ): Promise<Result<SearchProfile, SearchProfileNotFoundError | DomainError>> {
     const searchProfile = await this.searchProfileRepository.findById(input.id);
 
-    if (!searchProfile) {
+    if (!searchProfile || searchProfile.userId !== input.userId) {
       return Result.fail(new SearchProfileNotFoundError(input.id));
     }
 

@@ -10,9 +10,11 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
-  Query,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '@app/modules/auth/presentation/CurrentUser';
+import { JwtAuthGuard } from '@app/modules/auth/presentation/JwtAuthGuard';
 import { CreateSearchProfileUseCase } from '../application/createSearchProfile/CreateSearchProfileUseCase';
 import { GetSearchProfileUseCase } from '../application/getSearchProfile/GetSearchProfileUseCase';
 import { ListSearchProfilesUseCase } from '../application/listSearchProfiles/ListSearchProfilesUseCase';
@@ -22,11 +24,13 @@ import { ArchiveSearchProfileUseCase } from '../application/archiveSearchProfile
 import { UpdateSearchProfileUseCase } from '../application/updateSearchProfile/UpdateSearchProfileUseCase';
 import { SearchProfileNotFoundError } from '../application/errors/SearchProfileNotFoundError';
 import { CreateSearchProfileDto } from './dto/CreateSearchProfileDto';
-import { ListSearchProfilesQueryDto } from './dto/ListSearchProfilesQueryDto';
 import { UpdateSearchProfileDto } from './dto/UpdateSearchProfileDto';
 import { toSearchProfileResponse } from './searchProfilePresenter';
 
 @ApiTags('search-profiles')
+@ApiBearerAuth()
+@ApiResponse({ status: 401, description: 'Missing or invalid bearer token' })
+@UseGuards(JwtAuthGuard)
 @Controller('search-profiles')
 export class SearchProfilesController {
   constructor(
@@ -47,9 +51,9 @@ export class SearchProfilesController {
     status: 400,
     description: 'Invalid name or preferences (e.g. remote=false with no country)',
   })
-  async create(@Body() dto: CreateSearchProfileDto) {
+  async create(@CurrentUser('id') userId: string, @Body() dto: CreateSearchProfileDto) {
     const result = await this.createSearchProfileUseCase.execute({
-      userId: dto.userId,
+      userId,
       name: dto.name,
       description: dto.description,
       preferences: dto.preferences,
@@ -63,10 +67,10 @@ export class SearchProfilesController {
   }
 
   @Get()
-  @ApiOperation({ summary: "List a user's Search Profiles" })
-  @ApiResponse({ status: 200, description: "The user's Search Profiles (possibly empty)" })
-  async list(@Query() query: ListSearchProfilesQueryDto) {
-    const searchProfiles = await this.listSearchProfilesUseCase.execute({ userId: query.userId });
+  @ApiOperation({ summary: "List the authenticated user's Search Profiles" })
+  @ApiResponse({ status: 200, description: 'The Search Profiles for the authenticated user (possibly empty)' })
+  async list(@CurrentUser('id') userId: string) {
+    const searchProfiles = await this.listSearchProfilesUseCase.execute({ userId });
 
     return searchProfiles.map(toSearchProfileResponse);
   }
@@ -77,8 +81,8 @@ export class SearchProfilesController {
   @ApiResponse({ status: 200, description: 'Search Profile found' })
   @ApiResponse({ status: 400, description: 'Malformed id' })
   @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
-  async findById(@Param('id', ParseUUIDPipe) id: string) {
-    const result = await this.getSearchProfileUseCase.execute({ id });
+  async findById(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.getSearchProfileUseCase.execute({ id, userId });
 
     if (result.isFailure) {
       throw new NotFoundException(result.error.message);
@@ -94,8 +98,8 @@ export class SearchProfilesController {
   @ApiResponse({ status: 200, description: 'Search Profile paused' })
   @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is not active' })
   @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
-  async pause(@Param('id', ParseUUIDPipe) id: string) {
-    const result = await this.pauseSearchProfileUseCase.execute({ id });
+  async pause(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.pauseSearchProfileUseCase.execute({ id, userId });
 
     if (result.isFailure) {
       if (result.error instanceof SearchProfileNotFoundError) {
@@ -115,8 +119,8 @@ export class SearchProfilesController {
   @ApiResponse({ status: 200, description: 'Search Profile activated' })
   @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is not paused' })
   @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
-  async activate(@Param('id', ParseUUIDPipe) id: string) {
-    const result = await this.activateSearchProfileUseCase.execute({ id });
+  async activate(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.activateSearchProfileUseCase.execute({ id, userId });
 
     if (result.isFailure) {
       if (result.error instanceof SearchProfileNotFoundError) {
@@ -136,8 +140,8 @@ export class SearchProfilesController {
   @ApiResponse({ status: 200, description: 'Search Profile archived' })
   @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is already archived' })
   @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
-  async archive(@Param('id', ParseUUIDPipe) id: string) {
-    const result = await this.archiveSearchProfileUseCase.execute({ id });
+  async archive(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.archiveSearchProfileUseCase.execute({ id, userId });
 
     if (result.isFailure) {
       if (result.error instanceof SearchProfileNotFoundError) {
@@ -156,9 +160,14 @@ export class SearchProfilesController {
   @ApiResponse({ status: 200, description: 'Search Profile updated' })
   @ApiResponse({ status: 400, description: 'Malformed id, invalid name, or invalid preferences' })
   @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
-  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSearchProfileDto) {
+  async update(
+    @CurrentUser('id') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSearchProfileDto,
+  ) {
     const result = await this.updateSearchProfileUseCase.execute({
       id,
+      userId,
       name: dto.name,
       description: dto.description,
       preferences: dto.preferences,

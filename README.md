@@ -38,16 +38,21 @@ POST /search-profiles
 
 These endpoints exist so far:
 
-- `POST /search-profiles` — create.
+- `POST /auth/telegram` — log in (or sign up) with a Telegram Login Widget
+  payload, returns a bearer token.
+- `POST /search-profiles` — create, owned by the authenticated caller.
 - `GET /search-profiles/:id` — read one.
-- `GET /search-profiles?userId=...` — list a user's Search Profiles.
+- `GET /search-profiles` — list the authenticated caller's Search Profiles.
 - `PATCH /search-profiles/:id` — update `name`/`description`/`preferences`.
   Omitted fields are left unchanged; `description: null` explicitly clears
   it; `preferences`, if sent, fully replaces the existing value.
 - `POST /search-profiles/:id/pause` / `/activate` / `/archive` — status
   transitions (`active` → `paused` → `active`, either → `archived`).
 
-No Telegram, no DOU integration yet. Everything below runs **locally only**.
+Every `/search-profiles` endpoint requires a valid `Authorization: Bearer
+<token>` header (obtained from `POST /auth/telegram`) — `userId` is derived
+from the token, never client-supplied. No Telegram bot, no DOU integration
+yet. Everything below runs **locally only**.
 
 ## Stack
 
@@ -153,11 +158,21 @@ testing.
 
 ### Try it via curl
 
+Every `/search-profiles` call below needs a bearer token first. `POST
+/auth/telegram` expects a real Telegram Login Widget payload (`hash` is an
+HMAC-SHA256 signature over the other fields, keyed by your bot token) — not
+something you can hand-write, so mint one either by signing a payload with
+`TELEGRAM_BOT_TOKEN` from `.env` yourself, or reuse the test helper
+(`tests/helpers/signTelegramLoginPayloadHelper.ts`) that the auth specs use for
+the same purpose. Once you have a token:
+
 ```bash
+TOKEN="<token from POST /auth/telegram>"
+
 curl -X POST http://localhost:3000/search-profiles \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
-    "userId": "user-1",
     "name": "Backend Prague",
     "preferences": {
       "keywords": { "include": ["nestjs", "node"] },
@@ -170,29 +185,34 @@ curl -X POST http://localhost:3000/search-profiles \
   }'
 ```
 
-Expect a `201` with the created Search Profile. `location` is the only required
-part of `preferences`, and within it only `remote` is mandatory (`relocation`
-defaults to `false` when omitted; if `remote` is `false`, at least one `country`
-is required) — everything else is optional.
+Expect a `201` with the created Search Profile, owned by the token's user.
+`location` is the only required part of `preferences`, and within it only
+`remote` is mandatory (`relocation` defaults to `false` when omitted; if
+`remote` is `false`, at least one `country` is required) — everything else is
+optional.
 
 ```bash
-curl http://localhost:3000/search-profiles/<id-from-the-response-above>
+curl http://localhost:3000/search-profiles/<id-from-the-response-above> \
+  -H "Authorization: Bearer $TOKEN"
 
-curl "http://localhost:3000/search-profiles?userId=user-1"
+curl http://localhost:3000/search-profiles \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 The first returns that one Search Profile (`404` if the id doesn't exist,
-`400` if it's not a valid UUID); the second returns every Search Profile for
-that `userId` (`400` if `userId` is missing, `[]` if the user has none).
+`400` if it's not a valid UUID); the second returns every Search Profile
+owned by the token's user (`[]` if none). Every call without a valid
+`Authorization` header gets a `401`.
 
 ```bash
 curl -X PATCH http://localhost:3000/search-profiles/<id> \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{ "name": "Senior Backend Prague", "description": null }'
 
-curl -X POST http://localhost:3000/search-profiles/<id>/pause
-curl -X POST http://localhost:3000/search-profiles/<id>/activate
-curl -X POST http://localhost:3000/search-profiles/<id>/archive
+curl -X POST http://localhost:3000/search-profiles/<id>/pause -H "Authorization: Bearer $TOKEN"
+curl -X POST http://localhost:3000/search-profiles/<id>/activate -H "Authorization: Bearer $TOKEN"
+curl -X POST http://localhost:3000/search-profiles/<id>/archive -H "Authorization: Bearer $TOKEN"
 ```
 
 `PATCH` only touches fields present in the body — omit a field to leave it

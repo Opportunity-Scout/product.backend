@@ -134,7 +134,21 @@ consumers import from `../interfaces`, not the individual file. This is the
 only place under `tests/unit/` that uses a barrel; `src/` deliberately doesn't,
 to keep import paths traceable to their real source file. `integration/` and
 `e2e/`, once they exist, get their own `helpers/`/`interfaces/` the same way if
-they need them — not a shared one across test kinds.
+they need them, for anything tier-specific — not a shared one across test kinds.
+
+**`tests/helpers/`** (2026-08-06, sibling to `unit/`/`integration/`, not
+nested inside either) is the one exception to "not shared across test
+kinds" — reserved specifically for pure, tier-agnostic functions with zero
+test-tier-specific behavior, as opposed to test doubles/fixtures whose
+whole reason to exist is tier-specific (`FakeSearchProfileRepository` must
+stay unit-only by design: integration tests exercise the real Prisma
+adapter, a fake wouldn't even make sense there). First occupant:
+`signTelegramLoginPayload` (HMAC signing, used identically by unit specs for
+`TelegramLoginVerifier`/`AuthController` and by the integration spec for
+`AuthController`) — originally duplicated verbatim into a would-be
+`tests/integration/helpers/` copy, until IDE duplicate-code detection
+caught it and it moved here instead, once duplicating it was clearly just
+going to drift the two copies apart with no actual independence benefit.
 
 Jest config lives in `jest.config.ts` at the **repo root**, not inside `tests/`
 — same tier as `tsconfig.json`/`eslint.config.mjs`/`.prettierrc`, alongside every
@@ -357,6 +371,18 @@ input type structurally requires an index signature that a concrete `interface`
 never has, so some cast at that specific boundary is unavoidable, not a sign of
 an unsafe shortcut elsewhere.
 
+**The `<Technology><PortName>Adapter` pattern applies to every port, not just
+`*Repository` ones** (decided 2026-08-06, prompted by `TokenIssuer` /
+`JwtTokenIssuerAdapter` in the `auth` module): the reasoning — keeping "the
+contract" and "an implementation of it" visually distinct — has nothing to
+do with the port being a repository specifically, it applies equally to any
+port with exactly one current concrete implementation. So `TokenIssuer`
+(the port) is implemented by `JwtTokenIssuerAdapter` (not `JwtTokenIssuer`),
+the same way `SearchProfileRepository` is implemented by
+`PrismaSearchProfileAdapter`. Flagged in review after the class already
+existed without the suffix — should have applied the existing rule by
+analogy before implementing, not after.
+
 Reading a row back goes through `SearchProfile.reconstitute()`
 (`domain/SearchProfile.ts`), a second factory next to `create()` — `create()`
 generates a fresh `id` and is where creation-time validation belongs;
@@ -367,9 +393,18 @@ still run on the row's `preferences` JSON before handing it to
 `reconstitute()`, since VO-level validation isn't re-derivable the way an `id`
 is — a corrupted or hand-edited row should still fail loudly.
 
-Row↔domain mapping for an adapter (`toDomain`, `toPersistenceJson`) lives in
-its own file once there's more than one such function — `PrismaSearchProfileAdapter`
-has both, so they live in `infrastructure/persistence/helpers/prismaSearchProfileMapperHelper.ts`,
+Row↔domain mapping for an adapter (`toDomain`, `toPersistenceJson`) always
+lives in its own file, from the first such function — not "once there's more
+than one," unlike the error-class threshold above. The two thresholds are
+deliberately different: whether a *second* class will ever need the same
+error is genuinely uncertain per error, but every adapter has a mapping
+layer by the nature of the reconstitute-from-row pattern — the file's role
+is established the moment the adapter exists, not once a second function
+happens to join it. `PrismaSearchProfileAdapter` has two such functions
+(`toDomain`, `toPersistenceJson`); `PrismaUserAdapter` currently has only
+one (`toDomain` — `save()` builds its upsert payload inline, no nested VOs
+to serialize) and still gets its own file. Both live in
+`infrastructure/persistence/helpers/<name>MapperHelper.ts`,
 named like the `tests/unit/helpers/*Helper.ts` convention (camelCase file,
 ends in `Helper`) even though this one's in `src/`, not `tests/`: same
 reasoning applies — it signals "supporting code for the thing next to it,"
@@ -454,39 +489,110 @@ Open items from the first audit (2026-07-31), kept here until acted on:
   (GHSA-pm4m-ph32-ghv5) in its *parsing* path; we only call `jsyaml.dump()` on
   our own generated document (not reachable through this app as used), but
   re-check when `@nestjs/swagger` ships a fix upstream.
-- **`GET /search-profiles?userId=...`** (added 2026-08-04) trusts `userId` as
-  a bare client-supplied query param, with no `User`/auth entity yet to check
-  it against the actual caller. This is a real escalation over `GET /:id`
-  (which requires knowing an unguessable `randomUUID()`), not an equivalent
-  gap: anyone who knows/guesses a `userId` can list **all** of that user's
-  Search Profiles — including `compensation.minimumSalary`, `companies`,
-  `location` — and can probe whether a given `userId` has any profiles at
-  all (enumeration). Discussed explicitly on 2026-08-04 (should have been
-  flagged *before* implementing, per this section's own rule about new
-  public endpoints — it wasn't, and got caught in review instead). The
-  endpoint itself is a real product need (a user has multiple Search
-  Profiles; "list mine" is basic, not optional), so the fix isn't removing
-  it — it's that once `User`/auth exists, this endpoint must derive `userId`
-  from the authenticated caller (or verify the query param against it)
-  instead of trusting the query param outright. **Hard blocker: must be
-  closed before any real deployment**, same bar as the Swagger-gating item
-  above — not "nice to have, revisit eventually."
-- **`POST /search-profiles/:id/pause`** (added 2026-08-04, same gap applies
-  to the `activate`/`archive`/`PATCH` endpoints that followed it) trusts the
-  caller to be the profile's owner, with no `User`/auth entity yet to check
-  it against. Lower severity than the `GET ?userId=...` item above — `id` is
-  an unguessable `randomUUID()`, not a client-chosen string, so this isn't an
-  enumeration vector — but it's a **write**, not a read: anyone who obtains a
-  profile's id (a leaked log line, a shared link, a future "share your
-  search" feature) could pause someone else's active search — or, via
-  `PATCH`, silently rewrite their `preferences`/`name`/`description` — without
-  their consent, not just read their data. Same resolution as the `list`
-  item: accepted for now under the MVP's no-auth posture, not a reason to
-  remove the endpoint, but must derive/verify the caller's identity once
-  `User`/auth exists — tracked here specifically so it doesn't get missed
-  again the way it did the first time around (flagged in review, not
-  before implementing,
-  per this section's own rule).
+- **`GET /search-profiles?userId=...`** — **closed 2026-08-06.** The query
+  param is gone; `POST /search-profiles` and `GET /search-profiles` now sit
+  behind `JwtAuthGuard` and derive the caller's `userId` from the verified JWT
+  (`@CurrentUser('id')`), not a client-supplied value. No enumeration surface
+  left on these two endpoints.
+- **`GET /search-profiles/:id`, `POST /:id/pause`, `/:id/activate`,
+  `/:id/archive`, `PATCH /:id`** — **closed 2026-08-07.** Each of the five
+  use cases (`GetSearchProfileUseCase`, `PauseSearchProfileUseCase`,
+  `ActivateSearchProfileUseCase`, `ArchiveSearchProfileUseCase`,
+  `UpdateSearchProfileUseCase`) now takes the caller's `userId` in its input
+  (wired from `@CurrentUser('id')` in `SearchProfilesController`) and checks
+  `searchProfile.userId !== input.userId` right after `findById()`, failing
+  with the same `SearchProfileNotFoundError` as a genuinely-missing id — a
+  mismatch and a nonexistent id are indistinguishable from the response, so
+  there's no way to probe whether an id you don't own exists. Verified at
+  every layer: unit tests per use case and on the controller (cross-user
+  attempt → `NotFoundException`), integration tests per endpoint against
+  real Postgres, and a manual live-server check (two distinct JWTs, one
+  profile — owner gets `200`, the other user gets `404` on both read and
+  write). No open item left in this section.
+
+### Planned auth model (decided 2026-08-05, not built yet)
+
+Product direction settled on Telegram as the only customer-facing channel
+for the foreseeable future (no web/mobile app planned soon) — auth will be
+Telegram-native, not generic email/password. Telegram already verifies the
+caller's identity on every bot update (`message.from.id`), so there's no
+separate credential system to build.
+
+- **`User`** entity, keyed by `telegramUserId` (unique, verified by
+  Telegram itself, not client-suppliable) — this becomes the real `userId`
+  that `SearchProfile.userId` should reference, replacing today's bare
+  client-supplied string.
+- Two distinct trust boundaries, not one: the Telegram bot service is a
+  trusted server-to-server caller (Telegram already authenticated the human
+  on its end before the bot ever sees the update) vs. any other future
+  client (a web dashboard, direct API access), which needs real end-user
+  auth. For a future web case, the [Telegram Login
+  Widget](https://core.telegram.org/widgets/login) provides the same
+  `telegramUserId` identity cryptographically, so one identity model covers
+  both channels without a second, parallel auth system.
+- After identity is verified (via either path), issue a short-lived
+  session/JWT; every `SearchProfilesController` endpoint validates it via a
+  guard and derives `userId` server-side from it — never trusts a
+  client-supplied `userId` or an implicit "you own this `id`" claim again.
+  This is the actual planned fix for every open item above (`GET
+  ?userId=...`, `pause`/`activate`/`archive`/`PATCH`), not a separate,
+  unrelated task.
+- Deliberately not building generic OAuth/email-password: no channel other
+  than Telegram exists or is planned soon, and a multi-provider auth system
+  now would be exactly the kind of "for a hypothetical future" work this
+  project avoids elsewhere (see "What we are NOT doing right now"). Keep
+  "verify identity" and "issue/validate a session" as two separate internal
+  concerns regardless, so adding a second identity provider later (e.g.
+  Sign in with Apple, if a real iOS app ever happens) is additive, not a
+  rewrite.
+
+**Known, deliberate gap (2026-08-05):** `User.create()` (`domain/User.ts`)
+doesn't validate `telegramUserId` and returns a plain `User`, not a
+`Result` — unlike `SearchProfile.create()`, which rejects a blank `name` via
+`Result.fail`. Not an oversight: `User.create()` currently has no real
+caller at all (only tests construct a `User`), so there's nothing yet to
+defend against, same reasoning as not adding empty modules/DTOs "just in
+case." **Decide this — not before —** when the Telegram-auth use case
+(verify Login Widget `hash` → find/create `User`) is actually implemented:
+by that point `telegramUserId` will already have passed Telegram's own
+HMAC verification before ever reaching `User.create()`, same shape as the
+already-documented `SearchPreferences.create(null)` asymmetry — so the real
+question to answer then is whether that upstream guarantee makes
+domain-level validation redundant, not just whether to add it by default.
+
+**JWT expiry (decided 2026-08-06):** `AuthModule`'s `JwtModule.register()`
+sets `expiresIn: '30d'`. This is a real security-vs-simplicity tradeoff, not
+a default that should have been picked silently — flagged in review after
+the fact, should have been raised before implementing per this section's
+own rule. Reasoning kept here so it isn't re-litigated from scratch later:
+30 days is long by strict token-hygiene standards (a leaked token stays
+usable for a month), but there's no refresh-token flow built yet, and the
+bot channel specifically has no natural "user re-authenticates" event the
+way a web login does — a short expiry without refresh tokens would just
+mean silently losing access with no clear trigger to fix it. Accepted as an
+MVP simplification. **Revisit when either**: (a) refresh tokens get built
+(short-lived access token + long-lived refresh token, the standard
+pattern), or (b) real usage surfaces token-leak risk as a live concern —
+not on a schedule, on one of those two triggers.
+
+## Deployment (decided 2026-08-05, not set up yet)
+
+A fixed-cost VPS/dedicated host (e.g. Hetzner, DigitalOcean), not
+AWS/GCP/Azure, for the initial deployment — driven by cost predictability,
+not performance. On a prepaid VPS, the worst case from abuse (spam, a
+runaway crawler, a traffic spike) is the service falling over — bad, but
+financially bounded to what was already paid. On pay-as-you-go cloud
+providers, several commonly-used services (RDS storage auto-scaling, egress
+traffic, log ingestion) have no cost ceiling by default, and a single abuse
+pattern can generate an unexpectedly large bill before anyone notices — a
+real risk for a bootstrapped, pre-revenue solo project, not a hypothetical
+one. Revisit once there's paying-customer revenue and traffic patterns
+predictable enough to justify autoscaling's operational complexity — not
+before.
+
+Hosting choice alone protects the wallet, not uptime — rate limiting
+(already an open Security item above) is what protects the VPS itself from
+falling over under abuse; the two are complementary, not either/or.
 
 ## Project structure: feature-first (by bounded context)
 
@@ -537,7 +643,9 @@ they need.
 
 ### Entities
 
-- **User** — system user, has multiple Search Profiles.
+- **User** — system user, identified by `telegramUserId` once auth exists
+  (see "Planned auth model" under Security). Can have multiple Search
+  Profiles, but see the free-tier limit below.
 - **SearchProfile** — the user's intent. Fields: `id, userId, name, description,
   status, preferences, createdAt, updatedAt, lastMatchedAt`.
 - **Opportunity** — normalized, source-independent possibility. Fields:
@@ -556,6 +664,20 @@ they need.
   (`userId, opportunityId, status: opened|saved|applied|dismissed`). This is a
   separate aggregate, not fields on `Opportunity` — otherwise "applied" would be
   shared across all users.
+
+**Planned monetization limit (decided 2026-08-05, not implemented yet):**
+each `User` may have at most **1** `SearchProfile` for free; creating more
+requires a paid subscription. Not enforced in code today — no
+subscription/payment concept exists yet, and `userId` isn't a real,
+auth-backed identity yet either — tracked here so it isn't forgotten.
+Agreed sequencing: implement as its own task, after the auth model above
+exists (need a real `userId` to reliably count against) and before the
+first VPS deployment (closes the "anyone can spam unlimited Search
+Profiles" DB-bloat risk that came up during the auth/hosting discussion).
+Longer-term direction, not yet decided in detail: the free tier might
+become 2 profiles with paid tiers unlocking more, once real pricing is
+worked out — "1 for free" is deliberately the simplest possible number to
+build against first, not a final decision.
 
 ### SearchPreferences — composite Value Object
 
@@ -671,3 +793,52 @@ POST /search-profiles
 
 Real PostgreSQL persistence is wired up (see "Persistence"). Still no
 Telegram, no DOU.
+
+## Roadmap (agreed sequence, decided 2026-08-05)
+
+Order matters here — each step is a prerequisite for the next, not just a
+backlog:
+
+1. **Auth** — the Telegram-native model described under Security ("Planned
+   auth model"). Blocks everything below: nothing should go on a public VPS
+   without it.
+2. **Free-tier profile limit** (1 `SearchProfile` per `User`, see Domain →
+   "Planned monetization limit") — needs a real, auth-backed `userId` to
+   count against reliably, so it comes right after auth and strictly before
+   deployment, not bundled into either.
+3. **Deploy the API to a VPS** (see "Deployment") — bundle in the
+   already-tracked Security open items that are deployment-readiness gates:
+   rate limiting, and the Swagger decision below.
+   - **Swagger stays public on purpose** (not the original "gate it before
+     deployment" plan) — the repo is already public, and having the live
+     Swagger reachable via README/direct link is deliberately useful as an
+     interview/portfolio artifact. This is safe specifically *because* step
+     1 means every real endpoint requires auth by this point — Swagger
+     being browsable is just documentation exposure, not a way to actually
+     call anything without authorization.
+4. **E2E tests (Playwright) against the deployed API** — continues the
+   testing-tier plan from "Testing" (unit → integration → e2e, each
+   tier checked at the cheapest point that still catches what it's meant
+   to). **Open question, deliberately deferred to when this step actually
+   starts:** how do the e2e tests themselves authenticate, given auth is
+   Telegram-native and there's no password/API-key flow to script against?
+   Needs a real answer (e.g. a test-only auth bypass, a seeded test `User`
+   with a long-lived token, mocking the Telegram identity-verification
+   step) before this step can be implemented — not solved yet, intentionally.
+5. **DOU as the first source** (crawl → normalize → register → match),
+   ahead of the bot frontend — deliberately, not an arbitrary pick between
+   two equally-good options. Reasoning: without a real source, a bot only
+   offers CRUD over `SearchProfile`, which the API already does — no new
+   value. DOU is what makes the actual product loop (detect → match →
+   notify) real, and it's independently verifiable by inspecting `Match`
+   rows in Postgres, without needing a bot or any notification channel
+   built yet.
+6. **Telegram bot** (separate repo) — chat-first: notifications plus
+   one-tap actions via inline keyboard buttons (pause a search, view an
+   opportunity, dismiss). This matches the product's actual differentiator
+   (fast notification, a bot-native interaction) and is simpler/faster to
+   ship than a Mini App. A **Telegram Mini App** (in-Telegram web view,
+   same identity model via `initData`) is explicitly a *later*, separate
+   task for improving `SearchPreferences` setup/editing specifically — a
+   multi-field form is genuinely painful over pure chat — deferred until
+   real usage confirms that's worth solving, not built speculatively now.

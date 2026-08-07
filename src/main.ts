@@ -13,9 +13,12 @@ async function bootstrap() {
     .setTitle('Product Backend API')
     .setDescription('BeFirst Platform — Backend Skeleton API')
     .setVersion('0.0.1')
+    .addBearerAuth()
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('product-backend-api/swagger', app, swaggerDocument);
+  SwaggerModule.setup('product-backend-api/swagger', app, swaggerDocument, {
+    swaggerOptions: { tagsSorter: 'alpha' },
+  });
 
   const port = Number(process.env.PORT) || 3000;
   await app.listen(port);

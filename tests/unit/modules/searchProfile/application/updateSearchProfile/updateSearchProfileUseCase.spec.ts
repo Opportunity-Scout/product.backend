@@ -1,14 +1,15 @@
 import { UpdateSearchProfileUseCase } from '@app/modules/searchProfile/application/updateSearchProfile/UpdateSearchProfileUseCase';
+import { SearchProfileNotFoundError } from '@app/modules/searchProfile/application/errors/SearchProfileNotFoundError';
 import { FakeSearchProfileRepository } from '../../../../helpers/fakeSearchProfileRepositoryHelper';
 import { buildSearchProfile } from '../../../../helpers/buildSearchProfileHelper';
 
 describe('UpdateSearchProfileUseCase', () => {
   it('updates the name and persists it', async () => {
     const repository = new FakeSearchProfileRepository();
-    const profile = buildSearchProfile({ name: 'Backend Prague' });
+    const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
     await repository.save(profile);
     const useCase = new UpdateSearchProfileUseCase(repository);
-    const result = await useCase.execute({ id: profile.id, name: 'Senior Backend Prague' });
+    const result = await useCase.execute({ id: profile.id, userId: 'user-1', name: 'Senior Backend Prague' });
     const persisted = await repository.findById(profile.id);
 
     expect(result.isSuccess).toBe(true);
@@ -18,10 +19,15 @@ describe('UpdateSearchProfileUseCase', () => {
 
   it('leaves the name unchanged when omitted', async () => {
     const repository = new FakeSearchProfileRepository();
-    const profile = buildSearchProfile({ name: 'Backend Prague' });
+    const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
     await repository.save(profile);
     const useCase = new UpdateSearchProfileUseCase(repository);
-    const result = await useCase.execute({ id: profile.id, description: 'Updated description' });
+
+    const result = await useCase.execute({
+      id: profile.id,
+      userId: 'user-1',
+      description: 'Updated description',
+    });
 
     expect(result.isSuccess).toBe(true);
     expect(result.value.name).toBe('Backend Prague');
@@ -29,10 +35,10 @@ describe('UpdateSearchProfileUseCase', () => {
 
   it('clears the description when explicitly set to null', async () => {
     const repository = new FakeSearchProfileRepository();
-    const profile = buildSearchProfile({ description: 'Remote-friendly backend roles' });
+    const profile = buildSearchProfile({ userId: 'user-1', description: 'Remote-friendly backend roles' });
     await repository.save(profile);
     const useCase = new UpdateSearchProfileUseCase(repository);
-    const result = await useCase.execute({ id: profile.id, description: null });
+    const result = await useCase.execute({ id: profile.id, userId: 'user-1', description: null });
 
     expect(result.isSuccess).toBe(true);
     expect(result.value.description).toBeNull();
@@ -40,12 +46,13 @@ describe('UpdateSearchProfileUseCase', () => {
 
   it('fully replaces preferences when provided', async () => {
     const repository = new FakeSearchProfileRepository();
-    const profile = buildSearchProfile();
+    const profile = buildSearchProfile({ userId: 'user-1' });
     await repository.save(profile);
     const useCase = new UpdateSearchProfileUseCase(repository);
 
     const result = await useCase.execute({
       id: profile.id,
+      userId: 'user-1',
       preferences: { location: { remote: false, countries: ['CZ'] } },
     });
 
@@ -56,12 +63,13 @@ describe('UpdateSearchProfileUseCase', () => {
 
   it('fails without persisting when preferences are invalid', async () => {
     const repository = new FakeSearchProfileRepository();
-    const profile = buildSearchProfile();
+    const profile = buildSearchProfile({ userId: 'user-1' });
     await repository.save(profile);
     const useCase = new UpdateSearchProfileUseCase(repository);
 
     const result = await useCase.execute({
       id: profile.id,
+      userId: 'user-1',
       preferences: { location: { remote: false } },
     });
 
@@ -73,10 +81,10 @@ describe('UpdateSearchProfileUseCase', () => {
 
   it('fails without persisting when the new name is blank', async () => {
     const repository = new FakeSearchProfileRepository();
-    const profile = buildSearchProfile({ name: 'Backend Prague' });
+    const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
     await repository.save(profile);
     const useCase = new UpdateSearchProfileUseCase(repository);
-    const result = await useCase.execute({ id: profile.id, name: '   ' });
+    const result = await useCase.execute({ id: profile.id, userId: 'user-1', name: '   ' });
     const persisted = await repository.findById(profile.id);
 
     expect(result.isFailure).toBe(true);
@@ -86,8 +94,19 @@ describe('UpdateSearchProfileUseCase', () => {
   it('fails when no search profile exists for the id', async () => {
     const repository = new FakeSearchProfileRepository();
     const useCase = new UpdateSearchProfileUseCase(repository);
-    const result = await useCase.execute({ id: 'missing-id', name: 'Senior Backend Prague' });
+    const result = await useCase.execute({ id: 'missing-id', userId: 'user-1', name: 'Senior Backend Prague' });
 
     expect(result.isFailure).toBe(true);
+  });
+
+  it('fails with the same not-found error when the profile belongs to a different user', async () => {
+    const repository = new FakeSearchProfileRepository();
+    const profile = buildSearchProfile({ userId: 'user-1' });
+    await repository.save(profile);
+    const useCase = new UpdateSearchProfileUseCase(repository);
+    const result = await useCase.execute({ id: profile.id, userId: 'user-2', name: 'Senior Backend Prague' });
+
+    expect(result.isFailure).toBe(true);
+    expect(result.error).toBeInstanceOf(SearchProfileNotFoundError);
   });
 });
