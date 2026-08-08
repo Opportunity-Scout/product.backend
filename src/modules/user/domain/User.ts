@@ -1,6 +1,11 @@
 import { randomUUID } from 'crypto';
+import { Result } from '@app/common/kernel/Result';
 import { CreateUserProps } from './interfaces/CreateUserProps';
 import { UserProps } from './interfaces/UserProps';
+import { UserRole } from './types/UserRole';
+import { InvalidSearchProfileLimitError } from './errors/InvalidSearchProfileLimitError';
+
+const DEFAULT_SEARCH_PROFILE_LIMIT = 1;
 
 export class User {
   private constructor(private readonly props: UserProps) {}
@@ -10,6 +15,8 @@ export class User {
       id: randomUUID(),
       telegramUserId: input.telegramUserId,
       telegramUsername: input.telegramUsername ?? null,
+      role: 'user',
+      searchProfileLimit: DEFAULT_SEARCH_PROFILE_LIMIT,
       createdAt: new Date(),
     });
   }
@@ -22,6 +29,14 @@ export class User {
     return new User({ ...this.props, telegramUsername });
   }
 
+  setSearchProfileLimit(limit: number): Result<User, InvalidSearchProfileLimitError> {
+    if (!Number.isInteger(limit) || limit < 0) {
+      return Result.fail(new InvalidSearchProfileLimitError(limit));
+    }
+
+    return Result.ok(new User({ ...this.props, searchProfileLimit: limit }));
+  }
+
   get id(): string {
     return this.props.id;
   }
@@ -32,6 +47,14 @@ export class User {
 
   get telegramUsername(): string | null {
     return this.props.telegramUsername;
+  }
+
+  get role(): UserRole {
+    return this.props.role;
+  }
+
+  get searchProfileLimit(): number {
+    return this.props.searchProfileLimit;
   }
 
   get createdAt(): Date {

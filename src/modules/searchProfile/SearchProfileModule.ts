@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '@app/common/persistence/PrismaModule';
 import { AuthModule } from '@app/modules/auth/AuthModule';
+import { UserModule } from '@app/modules/user/UserModule';
 import { SearchProfilesController } from './presentation/SearchProfilesController';
 import { CreateSearchProfileUseCase } from './application/createSearchProfile/CreateSearchProfileUseCase';
 import { GetSearchProfileUseCase } from './application/getSearchProfile/GetSearchProfileUseCase';
@@ -13,7 +14,7 @@ import { SEARCH_PROFILE_REPOSITORY } from './application/ports/SearchProfileRepo
 import { PrismaSearchProfileAdapter } from './infrastructure/persistence/PrismaSearchProfileAdapter';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, UserModule],
   controllers: [SearchProfilesController],
   providers: [
     CreateSearchProfileUseCase,

@@ -15,11 +15,15 @@ export class PrismaUserAdapter implements UserRepository {
         id: user.id,
         telegramUserId: user.telegramUserId,
         telegramUsername: user.telegramUsername,
+        role: user.role,
+        searchProfileLimit: user.searchProfileLimit,
         createdAt: user.createdAt,
       },
       update: {
         telegramUserId: user.telegramUserId,
         telegramUsername: user.telegramUsername,
+        role: user.role,
+        searchProfileLimit: user.searchProfileLimit,
       },
     });
   }

@@ -7,6 +7,8 @@ class PrismaUserMapper {
       id: row.id,
       telegramUserId: row.telegramUserId,
       telegramUsername: row.telegramUsername,
+      role: row.role,
+      searchProfileLimit: row.searchProfileLimit,
       createdAt: row.createdAt,
     });
   }

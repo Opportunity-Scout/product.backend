@@ -16,8 +16,12 @@ describe('PrismaUserAdapter', () => {
     expect(call.where).toEqual({ id: user.id });
     expect(call.create.id).toBe(user.id);
     expect(call.create.createdAt).toBe(user.createdAt);
+    expect(call.create.role).toBe('user');
+    expect(call.create.searchProfileLimit).toBe(1);
     expect(call.update.id).toBeUndefined();
     expect(call.update.createdAt).toBeUndefined();
+    expect(call.update.role).toBe('user');
+    expect(call.update.searchProfileLimit).toBe(1);
   });
 
   it('returns null when no row exists for the given id', async () => {
@@ -37,6 +41,8 @@ describe('PrismaUserAdapter', () => {
       id: 'existing-id',
       telegramUserId: '12345',
       telegramUsername: 'oleg',
+      role: 'admin',
+      searchProfileLimit: 3,
       createdAt: now,
     });
 
@@ -46,6 +52,8 @@ describe('PrismaUserAdapter', () => {
     expect(found?.id).toBe('existing-id');
     expect(found?.telegramUserId).toBe('12345');
     expect(found?.telegramUsername).toBe('oleg');
+    expect(found?.role).toBe('admin');
+    expect(found?.searchProfileLimit).toBe(3);
   });
 
   it('returns null when no row exists for the given telegram id', async () => {
@@ -65,6 +73,8 @@ describe('PrismaUserAdapter', () => {
       id: 'existing-id',
       telegramUserId: '12345',
       telegramUsername: null,
+      role: 'user',
+      searchProfileLimit: 1,
       createdAt: now,
     });
 

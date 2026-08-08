@@ -48,6 +48,8 @@ These endpoints exist so far:
   it; `preferences`, if sent, fully replaces the existing value.
 - `POST /search-profiles/:id/pause` / `/activate` / `/archive` — status
   transitions (`active` → `paused` → `active`, either → `archived`).
+- `PATCH /users/:id/search-profile-limit` — admin-only: set a user's Search
+  Profile limit (free tier defaults to `1` active/paused profile).
 
 Every `/search-profiles` endpoint requires a valid `Authorization: Bearer
 <token>` header (obtained from `POST /auth/telegram`) — `userId` is derived
@@ -220,6 +222,23 @@ unchanged, send `description: null` to clear it, send `preferences` to fully
 replace it. The status endpoints enforce legal transitions only
 (`pause` needs `active`, `activate` needs `paused`, `archive` accepts either)
 — an illegal one (e.g. pausing an already-paused profile) is a `400`.
+
+Each user can have at most **1** `active`/`paused` Search Profile at a time
+(free tier) — creating a second one while already at the limit is a `400`.
+Archiving a profile frees up the slot. An admin can raise a specific user's
+limit:
+
+```bash
+curl -X PATCH http://localhost:3000/users/<user-id>/search-profile-limit \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{ "limit": 3 }'
+```
+
+Requires the caller's own user row to have `role = 'admin'` in Postgres —
+there's no self-service way to become an admin. Bootstrap the first one by
+hand (`npm run prisma:studio`, or `UPDATE users SET role = 'admin' WHERE id
+= '<your-user-id>'`) after logging in once via `POST /auth/telegram`.
 
 ### Stopping / cleanup
 
