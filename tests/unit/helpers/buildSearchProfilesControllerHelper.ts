@@ -7,13 +7,24 @@ import { ActivateSearchProfileUseCase } from '@app/modules/searchProfile/applica
 import { ArchiveSearchProfileUseCase } from '@app/modules/searchProfile/application/archiveSearchProfile/ArchiveSearchProfileUseCase';
 import { UpdateSearchProfileUseCase } from '@app/modules/searchProfile/application/updateSearchProfile/UpdateSearchProfileUseCase';
 import { SearchProfileRepository } from '@app/modules/searchProfile/application/ports/SearchProfileRepository';
+import { UserRepository } from '@app/modules/user/application/ports/UserRepository';
 import { FakeSearchProfileRepository } from './fakeSearchProfileRepositoryHelper';
+import { FakeUserRepository } from './fakeUserRepositoryHelper';
+import { buildUser } from './buildUserHelper';
+
+function buildDefaultUserRepository(): FakeUserRepository {
+  const repository = new FakeUserRepository();
+  repository.saved.push(buildUser({ id: 'user-1' }));
+
+  return repository;
+}
 
 export function buildSearchProfilesController(
   repository: SearchProfileRepository = new FakeSearchProfileRepository(),
+  userRepository: UserRepository = buildDefaultUserRepository(),
 ): SearchProfilesController {
   return new SearchProfilesController(
-    new CreateSearchProfileUseCase(repository),
+    new CreateSearchProfileUseCase(repository, userRepository),
     new GetSearchProfileUseCase(repository),
     new ListSearchProfilesUseCase(repository),
     new PauseSearchProfileUseCase(repository),

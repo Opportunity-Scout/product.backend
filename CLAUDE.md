@@ -665,19 +665,88 @@ they need.
   separate aggregate, not fields on `Opportunity` — otherwise "applied" would be
   shared across all users.
 
-**Planned monetization limit (decided 2026-08-05, not implemented yet):**
-each `User` may have at most **1** `SearchProfile` for free; creating more
-requires a paid subscription. Not enforced in code today — no
-subscription/payment concept exists yet, and `userId` isn't a real,
-auth-backed identity yet either — tracked here so it isn't forgotten.
-Agreed sequencing: implement as its own task, after the auth model above
-exists (need a real `userId` to reliably count against) and before the
-first VPS deployment (closes the "anyone can spam unlimited Search
-Profiles" DB-bloat risk that came up during the auth/hosting discussion).
-Longer-term direction, not yet decided in detail: the free tier might
-become 2 profiles with paid tiers unlocking more, once real pricing is
-worked out — "1 for free" is deliberately the simplest possible number to
-build against first, not a final decision.
+**Monetization limit (implemented 2026-08-07):** each `User` has a
+`searchProfileLimit: number` field (`@default(1)` in Postgres, set the same
+way in `User.create()`) — `CreateSearchProfileUseCase` counts that user's
+**active + paused** `SearchProfile`s (not `archived` — an archived profile
+doesn't count against the limit, so archiving one always frees up a slot)
+and fails with `SearchProfileLimitExceededError` (→ `400`, same bucket as
+every other "current state doesn't allow this" failure, e.g.
+`InvalidSearchProfileStatusTransitionError`) once the count reaches the
+limit. No subscription/payment concept exists yet — there's no automated
+way for a user to raise their own limit — but the field and the enforcement
+are real and tested (unit + integration). Longer-term direction, still not
+decided in detail: the free tier might become 2 profiles with paid tiers
+unlocking more, once real pricing is worked out — "1 for free" was
+deliberately the simplest possible default to build against first, not a
+final decision; changing it later is a one-line default change plus a
+backfill migration for existing rows, not a redesign.
+
+**Known, deliberate gap (2026-08-07):** the active/paused count and the
+subsequent `save()` in `CreateSearchProfileUseCase` are two separate,
+unsynchronized repository calls — not wrapped in a transaction or backed
+by any DB-level lock. Two concurrent `POST /search-profiles` requests from
+the same user (a double-click, a client retrying after a slow response)
+could both read the same pre-insert count and both pass the limit check
+before either one's insert lands, briefly exceeding the limit. Low
+severity: self-healing (the very next `create()` call re-checks the real
+count and blocks), no data corruption, no security exposure — and closing
+it correctly needs a real Unit-of-Work/transaction primitive that doesn't
+exist anywhere in this codebase yet (every repository port call is
+independent; nothing currently threads one Prisma transaction across two
+adapters), not a one-line fix. Deliberately not fixed immediately when
+found — flagged in review, discussed, and explicitly scheduled instead:
+**Roadmap step 5**, after E2E tests and before DOU, so it lands before DOU
+brings real (possibly automated/bursty) write traffic into the picture.
+
+**Admin override mechanism (decided + implemented 2026-08-07):** `User`
+gained a `role: 'user' | 'admin'` field (`@default(user)`). A new
+`AdminGuard` (`modules/user/presentation/AdminGuard.ts`) checks the live
+`role` of the authenticated caller (re-fetched from Postgres on every
+request, not embedded in the JWT — a 30-day-lived token must not carry
+30-day-stale admin rights) and gates a new admin-only endpoint,
+`PATCH /users/:id/search-profile-limit`
+(`SetSearchProfileLimitUseCase` → `User.setSearchProfileLimit()`, which
+validates `limit` is a non-negative integer — `0` is a legal value,
+deliberately: the same lever that raises a paying customer's limit also
+works as an abuse kill-switch, no separate "ban user" feature needed).
+Chosen over an env-var allowlist of admin `telegramUserId`s specifically
+because it reuses the existing Telegram-native identity system rather than
+adding a second, parallel one — the explicit goal (stated when this was
+scoped) was a mechanism that generalizes/automates later, and "flip a role
+column" is the shape a future payment webhook would also use to grant
+access, not a manual-only dead end.
+- **Bootstrapping the first admin** is deliberately *not* a built endpoint
+  — with exactly one operator (the person running this service) needed for
+  the foreseeable future, promoting that one row (`UPDATE users SET role =
+  'admin' WHERE id = '...'`, or the same edit via `npm run prisma:studio`)
+  costs nothing and doesn't justify a privileged "bootstrap" HTTP surface
+  that would itself need securing. Revisit only if a second, distinct
+  support operator is ever needed and hand-editing Postgres per new admin
+  stops being acceptable.
+- **`UserModule` ⇄ `AuthModule` circular import**, resolved with
+  `forwardRef()` on both sides: `AuthModule` already needed `UserModule`
+  (to look up/create a `User` during Telegram login), and now `UserModule`
+  needs `AuthModule`'s `JwtAuthGuard` (`UsersController` requires a valid
+  bearer token before `AdminGuard` even runs). This is the first genuine
+  case of two modules mutually depending on each other in this codebase —
+  `forwardRef()` is Nest's own first-class, documented answer to exactly
+  this shape, chosen over restructuring `JwtAuthGuard`/`CurrentUser` into
+  `common/` (which would avoid the cycle entirely) because that would touch
+  already-shipped, already-tested code across multiple modules for a
+  problem `forwardRef()` already solves in two lines — revisit the
+  `common/` move only if a *third* module hits the same cycle and the
+  pattern starts feeling structural rather than incidental.
+- **`User.create()` validation gap, revisited and left as-is:** the
+  "Known, deliberate gap" below asks to reconsider `User.create()`'s lack
+  of `Result`-based validation once a real caller with untrusted input
+  exists. `User.setSearchProfileLimit()` is that trigger for *this* field —
+  it now validates (`Result.fail(InvalidSearchProfileLimitError)`) because
+  admin-supplied `limit` is genuinely untrusted HTTP input. `User.create()`
+  itself still isn't Result-based: its only caller remains
+  `LoginWithTelegramUseCase`, where `telegramUserId` has already passed
+  Telegram's own HMAC verification before reaching it — same reasoning as
+  before, unchanged by this feature.
 
 ### SearchPreferences — composite Value Object
 
@@ -801,11 +870,16 @@ backlog:
 
 1. **Auth** — the Telegram-native model described under Security ("Planned
    auth model"). Blocks everything below: nothing should go on a public VPS
-   without it.
+   without it. **Done** (2026-08-06/07): Telegram Login Widget verification,
+   JWT issuance/guard, per-resource ownership checks on every
+   `SearchProfile` endpoint.
 2. **Free-tier profile limit** (1 `SearchProfile` per `User`, see Domain →
-   "Planned monetization limit") — needs a real, auth-backed `userId` to
-   count against reliably, so it comes right after auth and strictly before
-   deployment, not bundled into either.
+   "Monetization limit") — needs a real, auth-backed `userId` to count
+   against reliably, so it comes right after auth and strictly before
+   deployment, not bundled into either. **Done** (2026-08-07): enforced in
+   `CreateSearchProfileUseCase`, with a role-based admin endpoint
+   (`PATCH /users/:id/search-profile-limit`) to raise a specific user's
+   limit — see Domain → "Admin override mechanism".
 3. **Deploy the API to a VPS** (see "Deployment") — bundle in the
    already-tracked Security open items that are deployment-readiness gates:
    rate limiting, and the Swagger decision below.
@@ -825,7 +899,19 @@ backlog:
    Needs a real answer (e.g. a test-only auth bypass, a seeded test `User`
    with a long-lived token, mocking the Telegram identity-verification
    step) before this step can be implemented — not solved yet, intentionally.
-5. **DOU as the first source** (crawl → normalize → register → match),
+5. **Close the `CreateSearchProfileUseCase` free-tier-limit race** (see
+   Domain → "Monetization limit" → known gap) — add a real Unit-of-Work
+   port so the active/paused count and the insert run inside one Postgres
+   transaction with a row lock on the `User`, instead of two separate,
+   unsynchronized repository calls. Deliberately sequenced here, not fixed
+   immediately when found (2026-08-07): low severity (self-healing,
+   double-click-scale race, no data-integrity or security exposure) doesn't
+   justify introducing a new architectural primitive (nothing in this
+   codebase currently threads one Prisma transaction across two repository
+   adapters) mid-feature — but it should land before DOU brings real,
+   possibly-automated write traffic into the picture, not be forgotten
+   indefinitely.
+6. **DOU as the first source** (crawl → normalize → register → match),
    ahead of the bot frontend — deliberately, not an arbitrary pick between
    two equally-good options. Reasoning: without a real source, a bot only
    offers CRUD over `SearchProfile`, which the API already does — no new
@@ -833,7 +919,7 @@ backlog:
    notify) real, and it's independently verifiable by inspecting `Match`
    rows in Postgres, without needing a bot or any notification channel
    built yet.
-6. **Telegram bot** (separate repo) — chat-first: notifications plus
+7. **Telegram bot** (separate repo) — chat-first: notifications plus
    one-tap actions via inline keyboard buttons (pause a search, view an
    opportunity, dismiss). This matches the product's actual differentiator
    (fast notification, a bot-native interaction) and is simpler/faster to
