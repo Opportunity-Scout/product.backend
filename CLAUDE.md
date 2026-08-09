@@ -281,6 +281,22 @@ each npm script instead. No new dependency needed for 3-4 env vars; revisit
 `@nestjs/config` only if real per-environment validation/schemas become
 necessary.
 
+**Known, deliberate gap (2026-08-08):** production secrets (`.env` on the
+VPS) sit in a plaintext file — no encryption at rest, no access audit, no
+rotation. Discussed explicitly: this is standard practice for a solo
+operator with no second person holding server access and no real
+paying-customer data yet, same "no infra before it's actually needed"
+reasoning as Redis/BullMQ and the Unit-of-Work gap above — not an oversight.
+The considered alternative is SOPS + age (secrets encrypted with one key,
+the encrypted file committed to git for a real change history, decrypted
+with a single CLI call at deploy) over Vault or a cloud secret manager,
+specifically because it needs no service of its own to run/pay for and
+doesn't reintroduce the cloud-provider lock-in the VPS choice was made to
+avoid (see "Deployment" below). **Revisit when either**: (a) a second
+person gets access to the production server, or (b) the app starts holding
+real customer/payment data — not on a schedule, on one of those two
+triggers.
+
 `ValidationPipe` in `main.ts` sets `whitelist: true` **and** `forbidNonWhitelisted: true`
 — unknown body fields get a `400` instead of being silently dropped. Deliberate:
 we're pre-external-clients, so there's no forward-compat reason to tolerate stale
@@ -483,8 +499,8 @@ Open items from the first audit (2026-07-31), kept here until acted on:
   `-yaml`) are public with no auth check — fine while nothing is deployed and
   nothing sensitive is modeled, but must be gated (env check or auth) before
   any real deployment.
-- No rate limiting, no `helmet`, no explicit CORS config — acceptable for an
-  unauthenticated MVP, revisit before going live.
+- **Rate limiting, `helmet`, explicit CORS** — **closed 2026-08-08.** See
+  "Deployment" below for the full shape.
 - `@nestjs/swagger`'s `js-yaml` dependency has a known DoS advisory
   (GHSA-pm4m-ph32-ghv5) in its *parsing* path; we only call `jsyaml.dump()` on
   our own generated document (not reachable through this app as used), but
@@ -590,9 +606,159 @@ one. Revisit once there's paying-customer revenue and traffic patterns
 predictable enough to justify autoscaling's operational complexity — not
 before.
 
-Hosting choice alone protects the wallet, not uptime — rate limiting
-(already an open Security item above) is what protects the VPS itself from
-falling over under abuse; the two are complementary, not either/or.
+Hosting choice alone protects the wallet, not uptime — rate limiting is
+what protects the VPS itself from falling over under abuse; the two are
+complementary, not either/or.
+
+### Deployment readiness: rate limiting, `helmet`, CORS (2026-08-08)
+
+`@nestjs/throttler` is wired globally via `APP_GUARD` in `AppModule`, two
+named throttlers registered in `ThrottlerModule.forRoot()`: `default` (IP
+tracked, 60 req/min, applies to every route) and `perAccount` (same IP-based
+defaults everywhere by design — a no-op duplicate of `default` on most
+routes — except on `POST /auth/telegram`, where it's overridden to 5
+req/min tracked by the target `telegramUserId`, not IP). Both layers apply
+simultaneously to the login route: `default` catches one IP flooding the
+endpoint regardless of which account it claims to be; `perAccount` catches
+credential-stuffing one specific account from many different IPs — an
+attacker can't evade both by rotating either axis alone. Discussed and
+chosen deliberately over a single IP-only limit, which would miss the
+per-account brute-force case, and over a per-route `@SkipThrottle()` on
+every other controller, which would need remembering on every future
+controller. Limit/TTL values live in `common/rateLimiting/throttleLimits.ts`
+(named constants, not magic numbers, since they're genuinely cross-cutting —
+used from both `AppModule` and `AuthController`). Verified live (curl loop
+hitting `/auth/telegram` past both limits) and covered by an integration
+test using an isolated app instance (throttler storage is in-memory per
+process, so it can't share state with the file's other tests).
+
+**Trust proxy — a real bug caught in review, fixed (2026-08-09):** the
+verification above ("curl loop hitting `/auth/telegram`") was run against
+the bare app, before Caddy existed in this same PR — it couldn't have
+caught this. `@nestjs/throttler`'s default tracker (and `perAccount`'s IP
+fallback) both read `req.ip`, which Express only resolves from
+`X-Forwarded-For` if `trust proxy` is explicitly configured. Without it,
+Express reads the raw socket address — and since only Caddy can reach
+`app` on the compose network, *every* real client looks like Caddy's own
+container IP. That collapses `default`'s per-IP bucket into one bucket
+shared by the whole service (real users start 429-ing each other), and an
+attacker gets a free pass — no IP rotation needed, every request already
+looks like it's from the same source. Fixed with `app.set('trust proxy', 1)`
+in `configureApp.ts` (new file) — `1`, not `true` or Nest's own docs
+example (`'loopback'`), because the real topology is exactly one hop
+(Caddy) between the internet and this app; a numeric hop-count says that
+precisely, an IP-range preset would be guessing. `configureApp()` is a
+single function called from both `main.ts` and every integration spec that
+boots a real app — previously each spec duplicated the `ValidationPipe`
+setup inline and never applied `helmet`/CORS/trust-proxy at all, which is
+exactly why no existing test caught this. A regression test was added
+(two requests with different `X-Forwarded-For` values must land in
+independent `default` buckets) and verified against a false positive:
+temporarily reverted the `trust proxy` line, confirmed the test actually
+fails (second simulated IP inherits the first's usage), restored the fix,
+confirmed it passes.
+
+**`perAccount`'s tracker reads the request body before `ValidationPipe`
+runs**, so an attacker who doesn't care about one specific account can
+send a fresh random `id` on every request, giving each one its own
+untouched `perAccount` bucket. Not a new gap layered on top of the
+trust-proxy bug above — it's `perAccount`'s always-intended shape (catches
+targeted single-account brute force; general flood is `default`'s job, not
+this throttler's) — but the two findings compound: without a working
+`default`, *nothing* caught the "flood with random ids" pattern, since
+`perAccount` was never meant to and `default` couldn't see real IPs to
+catch it either. Fixing trust proxy closes this in practice, not just in
+theory — `default` now sees the real, single attacking IP regardless of
+how many fake `id`s it cycles through.
+
+**Known, deliberate gap (2026-08-09):** throttle counters live in
+`@nestjs/throttler`'s default in-memory storage — fine for the current
+single-`app`-instance `docker-compose.yml`, but if `app` is ever
+horizontally scaled, each instance counts independently and the real
+effective limit multiplies by instance count. Same "no Redis before it's
+actually needed" reasoning as everywhere else in this file — revisit
+specifically when a second `app` instance is ever introduced, moving
+throttle storage to whichever of Postgres/Redis is already in use by then.
+
+`helmet()` is applied in `main.ts`. CORS is explicitly disabled
+(`app.enableCors({ origin: false })`) rather than left unconfigured — no
+browser-based client exists or is planned soon (the Telegram bot is a
+server-to-server caller, not a browser; see "Planned auth model"). Revisit
+when a Telegram Mini App or web dashboard actually needs cross-origin
+access, and allowlist that specific origin then. Verified `helmet`'s
+default CSP doesn't break Swagger UI (headless Chromium render — the
+operation list, including `/search-profiles` and `/auth/telegram`, renders
+fully, no CSP violations) before considering this closed, since Swagger
+staying browsable is a deliberate product decision (see Roadmap step 3
+below), not something that could be silently broken by a security header.
+
+### Deployment shape: Docker + Caddy (2026-08-08)
+
+`Dockerfile` is a multi-stage build (`node:22-alpine`): a `build` stage runs
+the full `npm ci` + `nest build`, a `production` stage runs
+`npm ci --omit=dev` and copies only the compiled `dist/`. Both `npm ci`
+calls use `--ignore-scripts` followed by an explicit `npx prisma generate`
+— a Docker build context has no `.git` dir, so the `prepare` script's
+`husky` step fails outright, and in the production stage `husky` (a
+devDependency) isn't even installed to begin with; skipping lifecycle
+scripts and calling `prisma generate` ourselves is more predictable than
+relying on npm's implicit hook. Verified end-to-end against the real local
+Postgres container: built the image, ran it via `docker compose up -d app`,
+exercised a real `POST /auth/telegram` login through the container network,
+confirmed the row landed in Postgres. Final image is ~1GB (mostly the
+`npm ci --omit=dev` layer) — not optimized further yet, not a blocker for a
+VPS with normal disk headroom; revisit if it ever actually matters.
+
+`docker-compose.yml` gained two services alongside the existing `postgres`:
+`app` (built from the `Dockerfile`, `.env` mounted read-only for the
+secrets that don't differ by execution context) and `caddy` (official
+`caddy:2-alpine` image, reverse-proxying to `app`, automatic Let's Encrypt
+TLS). `app`'s `DATABASE_URL` is overridden via a plain `environment:` entry
+in the compose file (pointing at the `postgres` service name instead of the
+`.env` file's `localhost`) — Node's `--env-file` only fills in variables
+not already set in the process environment, so this override wins without
+needing a second `.env` file or any code change. `app`'s port is `expose`d,
+not `ports`-published — only `caddy` (same compose network) can reach it;
+nothing but 80/443 is meant to be open on the VPS itself. `app` has a
+`healthcheck` (`wget --spider http://localhost:3000/health`, same
+interval/timeout/retries as `postgres`'s) hitting a new, unauthenticated
+`GET /health` (`common/health/HealthController.ts`) — `caddy`'s
+`depends_on` now waits on `condition: service_healthy` the same way `app`
+already waits on `postgres`, instead of only waiting for the container to
+start (which doesn't mean the port is actually accepting connections yet).
+Caught in review as an asymmetry with the `postgres`/`app` pair; not
+previously broken in practice since Caddy's `reverse_proxy` retries failed
+upstream connections on its own, but this closes the gap for real instead
+of relying on that retry behavior.
+
+`Caddyfile` uses a placeholder domain (`your-domain.example`) — must be
+replaced with the real domain before an actual deploy, documented inline.
+Config syntax verified via `caddy validate` (a placeholder/non-resolvable
+domain can't be used to test real certificate issuance without a real DNS
+record, so that part is unverified until the real domain exists).
+
+**Deploy trigger stays manual, not continuous-on-push** (decided
+2026-08-08) — the automation itself (a GitHub Actions job that SSHes into
+the VPS and redeploys) is deliberately not built yet; when it is, it must
+be manually triggered (e.g. `workflow_dispatch`), not run automatically on
+every push to `main` the way the integration-tests workflow is. Revisit
+only if manual triggering becomes a real friction point, not by default.
+
+**Known, deliberate gap (2026-08-09): no Postgres backups yet.** Discussed
+explicitly, not an oversight — closing it needs a VPS/object-storage
+provider chosen first (a `pg_dump` cron sidecar in `docker-compose.yml`
+compressing and shipping to S3-compatible storage — e.g. Hetzner Object
+Storage or Backblaze B2, not AWS S3, same non-AWS cost-predictability
+reasoning as the VPS choice itself — is the planned shape), and building
+the upload/restore path against a destination that doesn't exist yet would
+be untested, false-confidence code, worse than an honestly-tracked gap.
+**Revisit as part of the first real deploy** — provider selection and
+initial backup wiring happen together, not backups deferred indefinitely
+after going live. Longer-term direction (not needed yet): WAL archiving
+via pgBackRest/WAL-G for point-in-time recovery once transaction
+volume/criticality justifies the added complexity over daily `pg_dump`
+snapshots, plus periodic automated restore verification and at-rest
+encryption once real customer data is involved.
 
 ## Project structure: feature-first (by bounded context)
 
@@ -882,7 +1048,14 @@ backlog:
    limit — see Domain → "Admin override mechanism".
 3. **Deploy the API to a VPS** (see "Deployment") — bundle in the
    already-tracked Security open items that are deployment-readiness gates:
-   rate limiting, and the Swagger decision below.
+   rate limiting, and the Swagger decision below. **App-side readiness
+   done** (2026-08-08): rate limiting/`helmet`/CORS, `Dockerfile`, and
+   `docker-compose.yml`'s `app`/`caddy` services — see "Deployment" for the
+   full shape. **Still open**: actually provisioning the VPS, pointing a
+   real domain at it (the `Caddyfile` still has a placeholder), Postgres
+   backups (see "Deployment" — blocked on the same provider choice), and
+   the deploy automation itself (manually-triggered, per the decision
+   above — not built yet).
    - **Swagger stays public on purpose** (not the original "gate it before
      deployment" plan) — the repo is already public, and having the live
      Swagger reachable via README/direct link is deliberately useful as an
@@ -893,12 +1066,37 @@ backlog:
 4. **E2E tests (Playwright) against the deployed API** — continues the
    testing-tier plan from "Testing" (unit → integration → e2e, each
    tier checked at the cheapest point that still catches what it's meant
-   to). **Open question, deliberately deferred to when this step actually
-   starts:** how do the e2e tests themselves authenticate, given auth is
-   Telegram-native and there's no password/API-key flow to script against?
-   Needs a real answer (e.g. a test-only auth bypass, a seeded test `User`
-   with a long-lived token, mocking the Telegram identity-verification
-   step) before this step can be implemented — not solved yet, intentionally.
+   to). Also a deliberate portfolio choice, not just a testing-pyramid
+   checkbox — the user works as a QA/test engineer and wants E2E coverage
+   as a visible skill demonstration. Decided (2026-08-08), not yet
+   implemented:
+   - **Auth resolved** — how the e2e tests authenticate (previously an open
+     question) is answered the same way the integration tests already
+     do it: sign a real Telegram Login Widget payload with the shared
+     `TELEGRAM_BOT_TOKEN` (stored as a GitHub Actions secret matching the
+     value on the VPS) and call the real, deployed `POST /auth/telegram`.
+     No test-only bypass, no mocked identity check — same code path as a
+     real login, just pointed at the live URL instead of an in-process
+     app.
+   - **No staging environment — e2e run directly against prod**, by
+     choice, not as a stopgap. A second VPS would be a second recurring
+     cost, working against the cost-predictability reasoning under
+     "Deployment" — and testing only against prod, accepting the tradeoff
+     that a red e2e run means the bug is already live, is common practice
+     even at scale, not just a solo-project compromise. Mitigation: CI at
+     least signals fast (red workflow), rollback is a manual
+     `git revert` + redeploy for now, not automated.
+   - **Test data cleanup happens for real, not left to accumulate** — each
+     e2e run's login creates a real `User` row (plus whatever `SearchProfile`
+     rows the run creates) in the actual production database. Since
+     GitHub Actions runners have no direct network path to the VPS's
+     Postgres (and shouldn't — it isn't meant to be publicly reachable),
+     cleanup can't reuse the integration tests' "connect a second
+     `PrismaClient` and delete by id" pattern. Needs a real account-deletion
+     path callable over the API (the e2e suite's own teardown) — likely a
+     `DELETE /users/:id`-shaped self-service endpoint, which is also a
+     legitimate feature on its own (not built solely for test cleanup) —
+     not implemented yet, tracked here as a prerequisite for this step.
 5. **Close the `CreateSearchProfileUseCase` free-tier-limit race** (see
    Domain → "Monetization limit" → known gap) — add a real Unit-of-Work
    port so the active/paused count and the insert run inside one Postgres

@@ -1,15 +1,15 @@
-import { Server } from 'http';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import * as request from 'supertest';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '@app/AppModule';
+import { configureApp } from '@app/configureApp';
 import { loginAsNewUser } from '../../../helpers/loginAsNewUserHelper';
 import { promoteToAdmin } from '../../../helpers/promoteToAdminHelper';
 
 describe('UsersController (integration)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let verificationClient: PrismaClient;
   const createdUserIds: string[] = [];
 
@@ -27,8 +27,8 @@ describe('UsersController (integration)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
-    app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app = moduleRef.createNestApplication<NestExpressApplication>();
+    configureApp(app);
     await app.init();
 
     verificationClient = new PrismaClient({
@@ -49,7 +49,7 @@ describe('UsersController (integration)', () => {
     it('returns 401 with no bearer token', async () => {
       const { userId } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/users/${userId}/search-profile-limit`)
         .send({ limit: 3 });
 
@@ -60,7 +60,7 @@ describe('UsersController (integration)', () => {
       const caller = await login();
       const target = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/users/${target.userId}/search-profile-limit`)
         .set('Authorization', `Bearer ${caller.token}`)
         .send({ limit: 3 });
@@ -73,7 +73,7 @@ describe('UsersController (integration)', () => {
       await promoteToAdmin(verificationClient, admin.userId);
       const target = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/users/${target.userId}/search-profile-limit`)
         .set('Authorization', authHeader(admin.token))
         .send({ limit: 3 });
@@ -89,7 +89,7 @@ describe('UsersController (integration)', () => {
       const admin = await login();
       await promoteToAdmin(verificationClient, admin.userId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch('/users/00000000-0000-0000-0000-000000000000/search-profile-limit')
         .set('Authorization', authHeader(admin.token))
         .send({ limit: 3 });
@@ -102,7 +102,7 @@ describe('UsersController (integration)', () => {
       await promoteToAdmin(verificationClient, admin.userId);
       const target = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/users/${target.userId}/search-profile-limit`)
         .set('Authorization', authHeader(admin.token))
         .send({ limit: -1 });
