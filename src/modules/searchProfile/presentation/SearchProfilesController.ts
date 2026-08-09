@@ -12,7 +12,17 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import { CurrentUser } from '@app/modules/auth/presentation/CurrentUser';
 import { JwtAuthGuard } from '@app/modules/auth/presentation/JwtAuthGuard';
 import { CreateSearchProfileUseCase } from '../application/createSearchProfile/CreateSearchProfileUseCase';
@@ -29,7 +39,7 @@ import { toSearchProfileResponse } from './searchProfilePresenter';
 
 @ApiTags('search-profiles')
 @ApiBearerAuth()
-@ApiResponse({ status: 401, description: 'Missing or invalid bearer token' })
+@ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token' })
 @UseGuards(JwtAuthGuard)
 @Controller('search-profiles')
 export class SearchProfilesController {
@@ -46,11 +56,8 @@ export class SearchProfilesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a Search Profile' })
-  @ApiResponse({ status: 201, description: 'Search Profile created' })
-  @ApiResponse({
-    status: 400,
-    description: 'Invalid name or preferences (e.g. remote=false with no country)',
-  })
+  @ApiCreatedResponse({ description: 'Search Profile created' })
+  @ApiBadRequestResponse({ description: 'Invalid name or preferences (e.g. remote=false with no country)' })
   async create(@CurrentUser('id') userId: string, @Body() dto: CreateSearchProfileDto) {
     const result = await this.createSearchProfileUseCase.execute({
       userId,
@@ -68,7 +75,7 @@ export class SearchProfilesController {
 
   @Get()
   @ApiOperation({ summary: "List the authenticated user's Search Profiles" })
-  @ApiResponse({ status: 200, description: 'The Search Profiles for the authenticated user (possibly empty)' })
+  @ApiOkResponse({ description: 'The Search Profiles for the authenticated user (possibly empty)' })
   async list(@CurrentUser('id') userId: string) {
     const searchProfiles = await this.listSearchProfilesUseCase.execute({ userId });
 
@@ -78,9 +85,9 @@ export class SearchProfilesController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a Search Profile by id' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Search Profile found' })
-  @ApiResponse({ status: 400, description: 'Malformed id' })
-  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  @ApiOkResponse({ description: 'Search Profile found' })
+  @ApiBadRequestResponse({ description: 'Malformed id' })
+  @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async findById(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     const result = await this.getSearchProfileUseCase.execute({ id, userId });
 
@@ -95,9 +102,9 @@ export class SearchProfilesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Pause a Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Search Profile paused' })
-  @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is not active' })
-  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  @ApiOkResponse({ description: 'Search Profile paused' })
+  @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is not active' })
+  @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async pause(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     const result = await this.pauseSearchProfileUseCase.execute({ id, userId });
 
@@ -116,9 +123,9 @@ export class SearchProfilesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Activate a paused Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Search Profile activated' })
-  @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is not paused' })
-  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  @ApiOkResponse({ description: 'Search Profile activated' })
+  @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is not paused' })
+  @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async activate(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     const result = await this.activateSearchProfileUseCase.execute({ id, userId });
 
@@ -137,9 +144,9 @@ export class SearchProfilesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Archive a Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Search Profile archived' })
-  @ApiResponse({ status: 400, description: 'Malformed id, or the Search Profile is already archived' })
-  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  @ApiOkResponse({ description: 'Search Profile archived' })
+  @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is already archived' })
+  @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async archive(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     const result = await this.archiveSearchProfileUseCase.execute({ id, userId });
 
@@ -157,9 +164,9 @@ export class SearchProfilesController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update a Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiResponse({ status: 200, description: 'Search Profile updated' })
-  @ApiResponse({ status: 400, description: 'Malformed id, invalid name, or invalid preferences' })
-  @ApiResponse({ status: 404, description: 'No Search Profile with this id' })
+  @ApiOkResponse({ description: 'Search Profile updated' })
+  @ApiBadRequestResponse({ description: 'Malformed id, invalid name, or invalid preferences' })
+  @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async update(
     @CurrentUser('id') userId: string,
     @Param('id', ParseUUIDPipe) id: string,

@@ -1,13 +1,14 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import './registerPaths';
 import { AppModule } from './AppModule';
+import { configureApp } from './configureApp';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  configureApp(app);
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Product Backend API')

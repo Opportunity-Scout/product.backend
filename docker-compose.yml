@@ -20,5 +20,41 @@ services:
       timeout: 5s
       retries: 5
 
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+    volumes:
+      - ./.env:/app/.env:ro
+    # Not published to the host — only Caddy (same compose network) reaches
+    # it, over the `app:3000` service DNS name.
+    expose:
+      - '3000'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', '--spider', 'http://localhost:3000/health']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:

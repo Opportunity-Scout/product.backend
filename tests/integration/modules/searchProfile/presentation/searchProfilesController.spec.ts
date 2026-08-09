@@ -1,15 +1,15 @@
-import { Server } from 'http';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import * as request from 'supertest';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '@app/AppModule';
+import { configureApp } from '@app/configureApp';
 import { loginAsNewUser } from '../../../helpers/loginAsNewUserHelper';
 import { promoteToAdmin } from '../../../helpers/promoteToAdminHelper';
 
 describe('SearchProfilesController (integration)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let verificationClient: PrismaClient;
   const createdSearchProfileIds: string[] = [];
   const createdUserIds: string[] = [];
@@ -24,8 +24,8 @@ describe('SearchProfilesController (integration)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
 
-    app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    app = moduleRef.createNestApplication<NestExpressApplication>();
+    configureApp(app);
     await app.init();
 
     verificationClient = new PrismaClient({
@@ -48,7 +48,7 @@ describe('SearchProfilesController (integration)', () => {
 
   describe('authentication', () => {
     it('returns 401 for POST /search-profiles with no bearer token', async () => {
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post('/search-profiles')
         .send({ name: 'Backend Prague', preferences: { location: { remote: true } } });
 
@@ -56,7 +56,7 @@ describe('SearchProfilesController (integration)', () => {
     });
 
     it('returns 401 for GET /search-profiles with no bearer token', async () => {
-      const response = await request(app.getHttpServer() as Server).get('/search-profiles');
+      const response = await request(app.getHttpServer()).get('/search-profiles');
 
       expect(response.status).toBe(401);
     });
@@ -67,7 +67,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token, userId } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -88,7 +88,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token, userId } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -96,7 +96,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .get(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${token}`);
 
@@ -107,7 +107,7 @@ describe('SearchProfilesController (integration)', () => {
     it('returns 404 when no search profile exists for the id', async () => {
       const { token } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .get('/search-profiles/00000000-0000-0000-0000-000000000000')
         .set('Authorization', `Bearer ${token}`);
 
@@ -117,7 +117,7 @@ describe('SearchProfilesController (integration)', () => {
     it('returns 400 for a malformed id', async () => {
       const { token } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .get('/search-profiles/not-a-uuid')
         .set('Authorization', `Bearer ${token}`);
 
@@ -129,7 +129,7 @@ describe('SearchProfilesController (integration)', () => {
       const owner = await login();
       const intruder = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${owner.token}`)
         .send(payload);
@@ -137,7 +137,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .get(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${intruder.token}`);
 
@@ -152,12 +152,12 @@ describe('SearchProfilesController (integration)', () => {
       const owner = await login();
       const other = await login();
 
-      const ownResponse = await request(app.getHttpServer() as Server)
+      const ownResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${owner.token}`)
         .send(ownPayload);
 
-      const otherResponse = await request(app.getHttpServer() as Server)
+      const otherResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${other.token}`)
         .send(otherPayload);
@@ -166,7 +166,7 @@ describe('SearchProfilesController (integration)', () => {
       const otherId = (otherResponse.body as { id: string }).id;
       createdSearchProfileIds.push(ownId, otherId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .get('/search-profiles')
         .set('Authorization', `Bearer ${owner.token}`);
 
@@ -183,7 +183,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -191,7 +191,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/pause`)
         .set('Authorization', `Bearer ${token}`);
 
@@ -205,7 +205,7 @@ describe('SearchProfilesController (integration)', () => {
     it('returns 404 when no search profile exists for the id', async () => {
       const { token } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post('/search-profiles/00000000-0000-0000-0000-000000000000/pause')
         .set('Authorization', `Bearer ${token}`);
 
@@ -216,7 +216,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -224,11 +224,11 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      await request(app.getHttpServer() as Server)
+      await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/pause`)
         .set('Authorization', `Bearer ${token}`);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/pause`)
         .set('Authorization', `Bearer ${token}`);
 
@@ -240,7 +240,7 @@ describe('SearchProfilesController (integration)', () => {
       const owner = await login();
       const intruder = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${owner.token}`)
         .send(payload);
@@ -248,7 +248,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/pause`)
         .set('Authorization', `Bearer ${intruder.token}`);
 
@@ -261,7 +261,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -269,11 +269,11 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      await request(app.getHttpServer() as Server)
+      await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/pause`)
         .set('Authorization', `Bearer ${token}`);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/activate`)
         .set('Authorization', `Bearer ${token}`);
 
@@ -287,7 +287,7 @@ describe('SearchProfilesController (integration)', () => {
     it('returns 404 when no search profile exists for the id', async () => {
       const { token } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post('/search-profiles/00000000-0000-0000-0000-000000000000/activate')
         .set('Authorization', `Bearer ${token}`);
 
@@ -298,7 +298,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -306,7 +306,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/activate`)
         .set('Authorization', `Bearer ${token}`);
 
@@ -318,7 +318,7 @@ describe('SearchProfilesController (integration)', () => {
       const owner = await login();
       const intruder = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${owner.token}`)
         .send(payload);
@@ -326,7 +326,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/activate`)
         .set('Authorization', `Bearer ${intruder.token}`);
 
@@ -339,7 +339,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -347,7 +347,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/archive`)
         .set('Authorization', `Bearer ${token}`);
 
@@ -361,7 +361,7 @@ describe('SearchProfilesController (integration)', () => {
     it('returns 404 when no search profile exists for the id', async () => {
       const { token } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post('/search-profiles/00000000-0000-0000-0000-000000000000/archive')
         .set('Authorization', `Bearer ${token}`);
 
@@ -372,7 +372,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -380,11 +380,11 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      await request(app.getHttpServer() as Server)
+      await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/archive`)
         .set('Authorization', `Bearer ${token}`);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/archive`)
         .set('Authorization', `Bearer ${token}`);
 
@@ -396,7 +396,7 @@ describe('SearchProfilesController (integration)', () => {
       const owner = await login();
       const intruder = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${owner.token}`)
         .send(payload);
@@ -404,7 +404,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .post(`/search-profiles/${createdId}/archive`)
         .set('Authorization', `Bearer ${intruder.token}`);
 
@@ -417,7 +417,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -425,7 +425,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${token}`)
         .send({ name: 'Senior Backend Prague' });
@@ -445,7 +445,7 @@ describe('SearchProfilesController (integration)', () => {
       };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -453,7 +453,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${token}`)
         .send({ description: null });
@@ -468,7 +468,7 @@ describe('SearchProfilesController (integration)', () => {
     it('returns 404 when no search profile exists for the id', async () => {
       const { token } = await login();
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch('/search-profiles/00000000-0000-0000-0000-000000000000')
         .set('Authorization', `Bearer ${token}`)
         .send({ name: 'Senior Backend Prague' });
@@ -480,7 +480,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -488,7 +488,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${token}`)
         .send({ preferences: { location: { remote: false } } });
@@ -500,7 +500,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -508,7 +508,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${token}`)
         .send({ name: null });
@@ -520,7 +520,7 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
@@ -528,7 +528,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${token}`)
         .send({ preferences: null });
@@ -541,7 +541,7 @@ describe('SearchProfilesController (integration)', () => {
       const owner = await login();
       const intruder = await login();
 
-      const createResponse = await request(app.getHttpServer() as Server)
+      const createResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${owner.token}`)
         .send(payload);
@@ -549,7 +549,7 @@ describe('SearchProfilesController (integration)', () => {
       const createdId = (createResponse.body as { id: string }).id;
       createdSearchProfileIds.push(createdId);
 
-      const response = await request(app.getHttpServer() as Server)
+      const response = await request(app.getHttpServer())
         .patch(`/search-profiles/${createdId}`)
         .set('Authorization', `Bearer ${intruder.token}`)
         .send({ name: 'Senior Backend Prague' });
@@ -563,14 +563,14 @@ describe('SearchProfilesController (integration)', () => {
       const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
       const { token } = await login();
 
-      const firstResponse = await request(app.getHttpServer() as Server)
+      const firstResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send(payload);
 
       createdSearchProfileIds.push((firstResponse.body as { id: string }).id);
 
-      const secondResponse = await request(app.getHttpServer() as Server)
+      const secondResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${token}`)
         .send({ ...payload, name: 'Second Profile' });
@@ -585,19 +585,19 @@ describe('SearchProfilesController (integration)', () => {
       const admin = await login();
       await promoteToAdmin(verificationClient, admin.userId);
 
-      const firstResponse = await request(app.getHttpServer() as Server)
+      const firstResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${target.token}`)
         .send(payload);
 
       createdSearchProfileIds.push((firstResponse.body as { id: string }).id);
 
-      const limitResponse = await request(app.getHttpServer() as Server)
+      const limitResponse = await request(app.getHttpServer())
         .patch(`/users/${target.userId}/search-profile-limit`)
         .set('Authorization', `Bearer ${admin.token}`)
         .send({ limit: 2 });
 
-      const secondResponse = await request(app.getHttpServer() as Server)
+      const secondResponse = await request(app.getHttpServer())
         .post('/search-profiles')
         .set('Authorization', `Bearer ${target.token}`)
         .send({ ...payload, name: 'Second Profile' });
