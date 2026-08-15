@@ -6,8 +6,14 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # Bound to loopback only — Docker manages its own iptables rules that
+    # can bypass ufw for ports published on all interfaces, so a bare
+    # `5432:5432` would risk exposing Postgres to the internet on a real
+    # server regardless of the firewall. `app` reaches this over the
+    # internal compose network by service name; this binding exists only
+    # so host-level tools (Prisma Studio, psql) can still reach it locally.
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
     volumes:
       # postgres 18+ recommends mounting the parent dir (not .../data) so
       # pg_upgrade --link works across major-version bumps without a
