@@ -251,23 +251,24 @@ hand (`npm run prisma:studio`, or `UPDATE users SET role = 'admin' WHERE id
 
 ## Deployment
 
-Not live yet — this section documents what's built so far, not a running
-production URL.
+In progress — the VPS is provisioned, the domain is live, and `postgres` +
+`app` are running and verified on the server (real login round-trip, real
+row written to Postgres). `caddy` (the last piece — reverse proxy +
+automatic TLS) isn't started yet, so nothing is reachable over HTTPS at
+`befirstapp.com` just yet.
 
 The app itself is containerized (`Dockerfile`, multi-stage: build then a
-lean production image) and `docker-compose.yml` has grown two more
-services alongside the existing `postgres`: `app` and `caddy` (reverse
-proxy + automatic TLS). `Caddyfile` still has a placeholder domain
-(`your-domain.example`) — needs the real domain before an actual deploy.
-`docker compose up -d` will build and run the full stack (Postgres, the
-API, Caddy) once that's filled in; nothing but Caddy's 80/443 is meant to
-be reachable from outside the host.
+lean production image) and `docker-compose.yml` runs three services
+alongside the existing local-dev `postgres`: the same `postgres`, `app`,
+and `caddy`. `docker compose up -d` builds and runs the full stack;
+nothing but Caddy's 80/443 is meant to be reachable from outside the VPS.
 
 Rate limiting, `helmet`, and an explicit (currently closed) CORS policy are
 already wired in — see `CLAUDE.md` → "Deployment readiness" for the
-reasoning behind each. Deploy itself (provisioning the VPS, wiring up CI to
-actually push a new version) is still manual and not yet automated —
-tracked in `CLAUDE.md` → "Roadmap".
+reasoning behind each. Server/domain choices (provider, region, plan,
+hardening) are documented in `CLAUDE.md` → "VPS provisioning". Deploy
+itself (wiring up CI to actually push a new version) is still manual and
+not yet automated — tracked in `CLAUDE.md` → "Roadmap".
 
 ## Testing, linting, formatting
 

@@ -591,7 +591,7 @@ MVP simplification. **Revisit when either**: (a) refresh tokens get built
 pattern), or (b) real usage surfaces token-leak risk as a live concern —
 not on a schedule, on one of those two triggers.
 
-## Deployment (decided 2026-08-05, not set up yet)
+## Deployment (decided 2026-08-05, VPS provisioning done 2026-08-15)
 
 A fixed-cost VPS/dedicated host (e.g. Hetzner, DigitalOcean), not
 AWS/GCP/Azure, for the initial deployment — driven by cost predictability,
@@ -609,6 +609,38 @@ before.
 Hosting choice alone protects the wallet, not uptime — rate limiting is
 what protects the VPS itself from falling over under abuse; the two are
 complementary, not either/or.
+
+### VPS provisioning (2026-08-15)
+
+**Provider: Spaceship (Starlight Virtual Machines)** — checked live
+pricing directly against the fixed-cost-VPS goal above before deciding,
+rather than assuming from memory.
+- **Region: US**, not Singapore (Spaceship's only other option) — closer
+  to Europe/Ukraine over the transatlantic route than the Asia-Pacific one.
+- **Plan: Standard 2** (2 vCPU / 4 GiB RAM / 60 GiB NVMe SSD / 2 TiB
+  transfer, $11.90/mo) — sized to run `postgres` + `app` + `caddy`
+  together on one instance; 2 TiB of transfer is far more than an
+  early-stage API needs, not a real constraint.
+- **Server hardening**: a non-root `deploy` user (in the `sudo` group) is
+  the only way in day-to-day — root SSH login and password authentication
+  are both disabled (`PermitRootLogin no`, `PasswordAuthentication no` in
+  `/etc/ssh/sshd_config.d/00-custom.conf`, the file Spaceship's own
+  provisioning actually controls — confirmed by checking which drop-in
+  config wins before editing, since three separate files in
+  `sshd_config.d/` disagreed on these settings). SSH itself runs on a
+  non-default port (`22022`, Spaceship's own convention, not something we
+  chose). `ufw` allows only `22022`, `80`, `443`, default-denies
+  everything else inbound.
+- **Domain: `befirstapp.com`** (`befirst.com`/`.app`/`.io`/`.tech`/`.com.im`
+  etc. were all already taken by others) — bought through Spaceship
+  alongside the VPS, DNS pointed at the server (`@` A record, `www`
+  CNAME to the root domain).
+- **Spaceship AutoBackup enabled** (whole-disk snapshot, 5-day rolling
+  retention, ~$2.38/mo) — a cheap supplementary safety net, explicitly
+  **not** a substitute for the planned `pg_dump`-to-S3-compatible-storage
+  backup (see "Known, deliberate gap" below, still open): a disk snapshot
+  isn't a clean logical dump of just the database, and it's tied to this
+  one provider, not portable if the VPS ever moves.
 
 ### Deployment readiness: rate limiting, `helmet`, CORS (2026-08-08)
 
@@ -782,11 +814,12 @@ is actually being planned** — not piecemeal, since e.g. adding
 `sslmode=require` only matters once the host stops being `postgres` on
 the same compose network in the first place.
 
-`Caddyfile` uses a placeholder domain (`your-domain.example`) — must be
-replaced with the real domain before an actual deploy, documented inline.
-Config syntax verified via `caddy validate` (a placeholder/non-resolvable
-domain can't be used to test real certificate issuance without a real DNS
-record, so that part is unverified until the real domain exists).
+`Caddyfile` points at the real domain, **`befirstapp.com`** (bought
+2026-08-15, both root and `www` — DNS: `@` A record → the VPS IP, `www`
+CNAME → the root domain), registered via Spaceship alongside the VPS
+itself. Config syntax verified via `caddy validate`; real certificate
+issuance from Caddy on the live server is the next thing to verify, now
+that DNS actually resolves.
 
 **Deploy trigger stays manual, not continuous-on-push** (decided
 2026-08-08) — the automation itself (a GitHub Actions job that SSHes into
@@ -795,15 +828,19 @@ be manually triggered (e.g. `workflow_dispatch`), not run automatically on
 every push to `main` the way the integration-tests workflow is. Revisit
 only if manual triggering becomes a real friction point, not by default.
 
-**Known, deliberate gap (2026-08-09): no Postgres backups yet.** Discussed
-explicitly, not an oversight — closing it needs a VPS/object-storage
-provider chosen first (a `pg_dump` cron sidecar in `docker-compose.yml`
-compressing and shipping to S3-compatible storage — e.g. Hetzner Object
-Storage or Backblaze B2, not AWS S3, same non-AWS cost-predictability
+**Known, deliberate gap (2026-08-09, VPS chosen 2026-08-15, still open): no
+logical Postgres backups yet.** Discussed explicitly, not an oversight —
+the VPS itself is now provisioned (see "VPS provisioning" above), but
+closing this still needs an object-storage destination chosen (a `pg_dump`
+cron sidecar in `docker-compose.yml` compressing and shipping to
+S3-compatible storage, not AWS S3, same non-AWS cost-predictability
 reasoning as the VPS choice itself — is the planned shape), and building
 the upload/restore path against a destination that doesn't exist yet would
 be untested, false-confidence code, worse than an honestly-tracked gap.
-**Revisit as part of the first real deploy** — provider selection and
+Spaceship's AutoBackup (see "VPS provisioning" above) is enabled in the
+meantime as a supplementary whole-disk safety net, not a substitute — it's
+not a clean logical dump and isn't portable off this one provider.
+**Revisit as part of the first real deploy** — object-storage selection and
 initial backup wiring happen together, not backups deferred indefinitely
 after going live. Longer-term direction (not needed yet): WAL archiving
 via pgBackRest/WAL-G for point-in-time recovery once transaction
@@ -1102,11 +1139,14 @@ backlog:
    rate limiting, and the Swagger decision below. **App-side readiness
    done** (2026-08-08): rate limiting/`helmet`/CORS, `Dockerfile`, and
    `docker-compose.yml`'s `app`/`caddy` services — see "Deployment" for the
-   full shape. **Still open**: actually provisioning the VPS, pointing a
-   real domain at it (the `Caddyfile` still has a placeholder), Postgres
-   backups (see "Deployment" — blocked on the same provider choice), and
-   the deploy automation itself (manually-triggered, per the decision
-   above — not built yet).
+   full shape. **VPS provisioned, domain pointed** (2026-08-15) — see
+   "VPS provisioning" under "Deployment" for the server/domain shape;
+   `postgres` + `app` verified live on the server (real login round-trip,
+   real DB write). **Still open**: starting `caddy` and verifying real
+   TLS issuance now that DNS resolves, the real `pg_dump`-to-S3 Postgres
+   backup (Spaceship's AutoBackup is a supplementary whole-disk snapshot,
+   not a substitute — see "Deployment"), and the deploy automation itself
+   (manually-triggered, per the decision above — not built yet).
    - **Swagger stays public on purpose** (not the original "gate it before
      deployment" plan) — the repo is already public, and having the live
      Swagger reachable via README/direct link is deliberately useful as an
