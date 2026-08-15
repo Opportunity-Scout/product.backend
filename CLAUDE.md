@@ -731,6 +731,57 @@ previously broken in practice since Caddy's `reverse_proxy` retries failed
 upstream connections on its own, but this closes the gap for real instead
 of relying on that retry behavior.
 
+**`postgres`'s published port is bound to loopback only** (`127.0.0.1:${POSTGRES_PORT:-5432}:5432`,
+not a bare `5432:5432`) — caught during the first real VPS deploy, before
+this shipped. Docker manages its own iptables rules for published ports,
+which can bypass `ufw` even when the firewall shows the port as denied —
+a bare host-port publish would risk exposing Postgres to the whole
+internet on a real server regardless of the firewall config, something
+that didn't matter for local dev (where "the internet" isn't a concern)
+but is a real gap on a public VPS. `app` never needed this publish at
+all — it reaches `postgres` over the internal compose network by service
+name; the loopback binding exists purely so host-level tools (Prisma
+Studio, a local `psql`) can still reach it, both locally and by SSHing
+into the VPS itself.
+
+**Known, deliberate coupling (2026-08-15): `postgres` is co-located with
+`app` in this one `docker-compose.yml`, not designed for a separate or
+managed database.** Flagged during the first real VPS deploy, before any
+decision to actually move the database exists — recorded now so it's
+decided as one piece later, not discovered one broken assumption at a
+time. Three things are implicitly tied to "Postgres is a sibling
+container on the same VPS" today, and all three change together the
+moment that stops being true (Postgres moves to its own host, or to a
+managed provider — RDS, Neon, Crunchy, Supabase, etc.):
+- **`DATABASE_URL`'s host.** Hardcoded to the compose-network service name
+  `postgres` (`app`'s `environment:` override above) — meaningless once
+  the database isn't a sibling container. There's no mechanism today for
+  "local compose runs its own Postgres, production compose points at an
+  external one" to diverge — no override file, no second compose file.
+  Needs one before the migration, not after.
+- **Encryption in transit.** `DATABASE_URL` sets no `sslmode`. Fine today
+  — traffic between `app` and `postgres` never leaves the Docker bridge
+  network, it's local to the VPS. The moment the database is a separate
+  host (even one on the same provider's "internal" network), that traffic
+  crosses a real network link, and an unencrypted connection stops being
+  theoretical. `sslmode=require` at minimum (`verify-full` with a CA cert,
+  if the provider supports it) needs deciding at that point, not left
+  implicit the way it is now.
+- **Network-level access control to the database.** The `127.0.0.1`
+  loopback bind just above is specific to "Postgres is a container on
+  this exact VPS" — it stops applying entirely once the database is
+  elsewhere. A managed provider needs its own equivalent (IP-allowlisting
+  the `app` server specifically, not a password-only connection open to
+  the internet), configured on the provider's side — a wholly different
+  surface than anything in this `docker-compose.yml`.
+
+Not a blocker now — no decision to move the database off this VPS exists,
+and building for that before it's real would be guessing. **Revisit all
+three together, as one decision, the moment a DB migration off this VPS
+is actually being planned** — not piecemeal, since e.g. adding
+`sslmode=require` only matters once the host stops being `postgres` on
+the same compose network in the first place.
+
 `Caddyfile` uses a placeholder domain (`your-domain.example`) — must be
 replaced with the real domain before an actual deploy, documented inline.
 Config syntax verified via `caddy validate` (a placeholder/non-resolvable
