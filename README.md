@@ -41,15 +41,27 @@ These endpoints exist so far:
 - `POST /auth/telegram` — log in (or sign up) with a Telegram Login Widget
   payload, returns a bearer token.
 - `POST /search-profiles` — create, owned by the authenticated caller.
-- `GET /search-profiles/:id` — read one.
+- `GET /search-profiles/:id` — read one (owner or admin).
 - `GET /search-profiles` — list the authenticated caller's Search Profiles.
-- `PATCH /search-profiles/:id` — update `name`/`description`/`preferences`.
-  Omitted fields are left unchanged; `description: null` explicitly clears
-  it; `preferences`, if sent, fully replaces the existing value.
+- `PATCH /search-profiles/:id` — update `name`/`description`/`preferences`
+  (owner or admin). Omitted fields are left unchanged; `description: null`
+  explicitly clears it; `preferences`, if sent, fully replaces the
+  existing value.
+- `DELETE /search-profiles/:id` — delete a single Search Profile (owner
+  or admin); distinct from `archive` below, which is a soft status change.
 - `POST /search-profiles/:id/pause` / `/activate` / `/archive` — status
   transitions (`active` → `paused` → `active`, either → `archived`).
+- `GET /search-profiles/admin` — admin-only: list Search Profiles across
+  all users, paginated, optionally filtered by `?userId=`.
+- `POST /search-profiles/admin` — admin-only: create a Search Profile on
+  behalf of an explicit `userId` in the body.
+- `GET /users` — admin-only: list/search users by Telegram username,
+  paginated.
 - `PATCH /users/:id/search-profile-limit` — admin-only: set a user's Search
   Profile limit (free tier defaults to `1` active/paused profile).
+- `DELETE /users/:id` — delete an account (cascading to all of its Search
+  Profiles): self-service for your own account, or an admin can delete
+  any account.
 
 Every `/search-profiles` endpoint requires a valid `Authorization: Bearer
 <token>` header (obtained from `POST /auth/telegram`) — `userId` is derived
@@ -215,6 +227,7 @@ curl -X PATCH http://localhost:3000/search-profiles/<id> \
 curl -X POST http://localhost:3000/search-profiles/<id>/pause -H "Authorization: Bearer $TOKEN"
 curl -X POST http://localhost:3000/search-profiles/<id>/activate -H "Authorization: Bearer $TOKEN"
 curl -X POST http://localhost:3000/search-profiles/<id>/archive -H "Authorization: Bearer $TOKEN"
+curl -X DELETE http://localhost:3000/search-profiles/<id> -H "Authorization: Bearer $TOKEN"
 ```
 
 `PATCH` only touches fields present in the body — omit a field to leave it
@@ -222,6 +235,8 @@ unchanged, send `description: null` to clear it, send `preferences` to fully
 replace it. The status endpoints enforce legal transitions only
 (`pause` needs `active`, `activate` needs `paused`, `archive` accepts either)
 — an illegal one (e.g. pausing an already-paused profile) is a `400`.
+`DELETE` permanently removes the row (`204` on success) — unlike `archive`,
+which just changes its status and keeps the record.
 
 Each user can have at most **1** `active`/`paused` Search Profile at a time
 (free tier) — creating a second one while already at the limit is a `400`.
@@ -240,6 +255,41 @@ there's no self-service way to become an admin. Bootstrap the first one by
 hand (`npm run prisma:studio`, or `UPDATE users SET role = 'admin' WHERE id
 = '<your-user-id>'`) after logging in once via `POST /auth/telegram`.
 
+An admin can also list users, and read/manage any Search Profile:
+
+```bash
+curl "http://localhost:3000/users?search=oleh&limit=20&offset=0" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+curl "http://localhost:3000/search-profiles/admin?userId=<user-id>&limit=20&offset=0" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+curl -X POST http://localhost:3000/search-profiles/admin \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{ "userId": "<user-id>", "name": "Backend Prague", "preferences": { "location": { "remote": true } } }'
+```
+
+`GET /users` and `GET /search-profiles/admin` are both paginated
+(`limit` defaults to `20`, capped at `100`; `offset` defaults to `0`) and
+return `{ ..., total, limit, offset }`. `GET /search-profiles/:id`,
+`PATCH /search-profiles/:id`, and `DELETE /search-profiles/:id` all
+already accept an admin caller too, not just the profile's owner — no
+separate admin route needed for those three, the check just widens from
+"is this yours" to "is this yours, or are you an admin."
+
+To delete an account (and every Search Profile it owns):
+
+```bash
+curl -X DELETE http://localhost:3000/users/<user-id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Returns `204` on success, `404` if `$TOKEN` belongs to neither the
+account's own owner nor an admin (indistinguishable from a nonexistent
+id — same reasoning as every other ownership check in this API). An
+admin can pass any user's id, not just their own.
+
 ### Stopping / cleanup
 
 - `Ctrl+C` in the terminal running `npm run start:dev` (and `npm run
@@ -251,11 +301,10 @@ hand (`npm run prisma:studio`, or `UPDATE users SET role = 'admin' WHERE id
 
 ## Deployment
 
-In progress — the VPS is provisioned, the domain is live, and `postgres` +
-`app` are running and verified on the server (real login round-trip, real
-row written to Postgres). `caddy` (the last piece — reverse proxy +
-automatic TLS) isn't started yet, so nothing is reachable over HTTPS at
-`befirstapp.com` just yet.
+Live at **[https://befirstapp.com](https://befirstapp.com)** — the VPS is
+provisioned, the domain is live, and `postgres` + `app` + `caddy` are all
+running and verified end-to-end on the server (real login round-trip, real
+row written to Postgres, real Let's Encrypt TLS certificate).
 
 The app itself is containerized (`Dockerfile`, multi-stage: build then a
 lean production image) and `docker-compose.yml` runs three services

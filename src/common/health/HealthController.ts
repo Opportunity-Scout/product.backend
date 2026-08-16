@@ -1,12 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiExcludeController } from '@nestjs/swagger';
 
-@ApiTags('health')
+// Internal liveness check (Docker healthcheck, future uptime monitoring) —
+// deliberately not part of the public API surface, so it's excluded from Swagger.
+@ApiExcludeController()
 @Controller('health')
 export class HealthController {
   @Get()
-  @ApiOperation({ summary: 'Liveness check — used by the Docker healthcheck, no auth required' })
-  @ApiOkResponse({ description: 'The process is up and serving requests' })
   check() {
     return { status: 'ok' };
   }

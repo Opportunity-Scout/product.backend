@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Result } from '@app/common/kernel/Result';
 import { DomainError } from '@app/common/kernel/DomainError';
+import { UserAccessService } from '@app/modules/user/application/UserAccessService';
 import { SearchProfile } from '../../domain/SearchProfile';
 import { SearchPreferences } from '../../domain/SearchPreferences';
 import { SEARCH_PROFILE_REPOSITORY, SearchProfileRepository } from '../ports/SearchProfileRepository';
@@ -12,6 +13,7 @@ export class UpdateSearchProfileUseCase {
   constructor(
     @Inject(SEARCH_PROFILE_REPOSITORY)
     private readonly searchProfileRepository: SearchProfileRepository,
+    private readonly userAccessService: UserAccessService,
   ) {}
 
   async execute(
@@ -19,7 +21,7 @@ export class UpdateSearchProfileUseCase {
   ): Promise<Result<SearchProfile, SearchProfileNotFoundError | DomainError>> {
     const searchProfile = await this.searchProfileRepository.findById(input.id);
 
-    if (!searchProfile || searchProfile.userId !== input.userId) {
+    if (!searchProfile || !(await this.userAccessService.isOwnerOrAdmin(searchProfile.userId, input.callerId))) {
       return Result.fail(new SearchProfileNotFoundError(input.id));
     }
 
