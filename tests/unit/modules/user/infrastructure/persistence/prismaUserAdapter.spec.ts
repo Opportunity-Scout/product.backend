@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { PrismaUserAdapter } from '@app/modules/user/infrastructure/persistence/PrismaUserAdapter';
 import { PrismaService } from '@app/common/persistence/PrismaService';
 import { buildUser } from '../../../../helpers/buildUserHelper';
@@ -85,5 +86,83 @@ describe('PrismaUserAdapter', () => {
     expect(call.where).toEqual({ telegramUserId: '12345' });
     expect(found?.telegramUserId).toBe('12345');
     expect(found?.telegramUsername).toBeNull();
+  });
+
+  it('queries with an empty where clause and maps rows when no search term is given', async () => {
+    const fakePrisma = buildFakePrismaService();
+    const now = new Date('2026-01-01T00:00:00.000Z');
+
+    fakePrisma.user.findMany.mockResolvedValue([
+      {
+        id: 'user-1',
+        telegramUserId: '1',
+        telegramUsername: null,
+        role: 'user',
+        searchProfileLimit: 1,
+        createdAt: now,
+      },
+    ]);
+    fakePrisma.user.count.mockResolvedValue(1);
+
+    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const result = await adapter.findMany({ limit: 20, offset: 0 });
+    const findManyCall = fakePrisma.user.findMany.mock.calls[0][0];
+
+    expect(findManyCall.where).toEqual({});
+    expect(findManyCall.take).toBe(20);
+    expect(findManyCall.skip).toBe(0);
+    expect(result.users).toHaveLength(1);
+    expect(result.total).toBe(1);
+  });
+
+  it('filters by a case-insensitive telegramUsername search term', async () => {
+    const fakePrisma = buildFakePrismaService();
+    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    await adapter.findMany({ search: 'oleh', limit: 20, offset: 0 });
+    const findManyCall = fakePrisma.user.findMany.mock.calls[0][0];
+    const countCall = fakePrisma.user.count.mock.calls[0][0];
+
+    expect(findManyCall.where).toEqual({ telegramUsername: { contains: 'oleh', mode: 'insensitive' } });
+    expect(countCall.where).toEqual({ telegramUsername: { contains: 'oleh', mode: 'insensitive' } });
+  });
+
+  it('deletes the row by id', async () => {
+    const fakePrisma = buildFakePrismaService();
+    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    await adapter.deleteById('user-1');
+
+    expect(fakePrisma.user.delete).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+  });
+
+  it('swallows a P2025 (already deleted) error as a successful no-op', async () => {
+    const fakePrisma = buildFakePrismaService();
+
+    fakePrisma.user.delete.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('No record found', { code: 'P2025', clientVersion: 'test' }),
+    );
+
+    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+
+    await expect(adapter.deleteById('user-1')).resolves.toBeUndefined();
+  });
+
+  it('rethrows a Prisma error that is not P2025', async () => {
+    const fakePrisma = buildFakePrismaService();
+
+    fakePrisma.user.delete.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
+    );
+
+    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+
+    await expect(adapter.deleteById('user-1')).rejects.toThrow('Unique constraint failed');
+  });
+
+  it('rethrows a non-Prisma error', async () => {
+    const fakePrisma = buildFakePrismaService();
+    fakePrisma.user.delete.mockRejectedValue(new Error('connection lost'));
+    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+
+    await expect(adapter.deleteById('user-1')).rejects.toThrow('connection lost');
   });
 });

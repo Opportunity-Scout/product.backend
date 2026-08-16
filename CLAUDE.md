@@ -817,9 +817,10 @@ the same compose network in the first place.
 `Caddyfile` points at the real domain, **`befirstapp.com`** (bought
 2026-08-15, both root and `www` — DNS: `@` A record → the VPS IP, `www`
 CNAME → the root domain), registered via Spaceship alongside the VPS
-itself. Config syntax verified via `caddy validate`; real certificate
-issuance from Caddy on the live server is the next thing to verify, now
-that DNS actually resolves.
+itself. **Verified live (2026-08-16):** `caddy` started on the VPS,
+obtained a real Let's Encrypt certificate, and `https://befirstapp.com`
+serves the app end-to-end (`GET /health`, the Swagger UI) with no browser
+TLS warning — the full stack (`postgres` + `app` + `caddy`) is live.
 
 **Deploy trigger stays manual, not continuous-on-push** (decided
 2026-08-08) — the automation itself (a GitHub Actions job that SSHes into
@@ -827,6 +828,28 @@ the VPS and redeploys) is deliberately not built yet; when it is, it must
 be manually triggered (e.g. `workflow_dispatch`), not run automatically on
 every push to `main` the way the integration-tests workflow is. Revisit
 only if manual triggering becomes a real friction point, not by default.
+
+**Known, deliberate gap (2026-08-16): redeploy causes a brief downtime,
+not zero-downtime.** `docker compose up -d --build` builds the new `app`
+image without touching the running container, then recreates only `app`
+(`postgres` and `caddy` keep running) — but between "old `app` stopped"
+and "new `app` passes its healthcheck," Caddy has nowhere to proxy to and
+returns `502`/`504` for a few seconds. Not fixed now, on purpose: there
+are no real users yet to be affected by it, and the actual fix (blue-green
+— start a second `app` container alongside the first, wait for its
+healthcheck, only then point Caddy at it and stop the old one) is real
+added complexity (two `app` instances live at once, coordinating the
+switch, deciding what happens if the new one never turns healthy) that
+isn't worth building against traffic that doesn't exist yet — same
+reasoning as every other "not before it's needed" gap in this file.
+**Revisit once there are real users who could be affected by a live
+deploy** — not on a schedule, on that trigger. Planned shape when it's
+time: Caddy already supports proxying to multiple upstreams, so the likely
+implementation is two `app` services in `docker-compose.yml`
+(`app-blue`/`app-green`) and a deploy script that builds+starts the idle
+one, polls its `/health`, and only then rewrites `Caddyfile`'s
+`reverse_proxy` target and reloads Caddy — no new tooling/orchestrator
+needed for a single-VPS setup this size.
 
 **Known, deliberate gap (2026-08-09, VPS chosen 2026-08-15, still open): no
 logical Postgres backups yet.** Discussed explicitly, not an oversight —
@@ -1002,6 +1025,204 @@ access, not a manual-only dead end.
   Telegram's own HMAC verification before reaching it — same reasoning as
   before, unchanged by this feature.
 
+**Self-service account deletion (decided + implemented 2026-08-16, admin
+override added same day):** `DELETE /users/:id` (`DeleteUserUseCase`) lets
+a user delete their own account — guarded by `JwtAuthGuard` only, no
+`AdminGuard`, so it moved out from under `UsersController`'s former
+controller-level `@UseGuards(JwtAuthGuard, AdminGuard)`; `AdminGuard` now
+sits on `setSearchProfileLimit` alone. Ownership is checked the same way
+as every `SearchProfile` endpoint (see Security → the five closed
+enumeration items): the path `:id` must match the caller's own id from
+the JWT, and a mismatch fails with the same `UserNotFoundError` (→ `404`)
+as a genuinely nonexistent id — no separate `403`, so there's nothing to
+distinguish "not yours" from "doesn't exist." **Admin override**: if the
+caller isn't the target's owner, `DeleteUserUseCase` asks the shared
+`UserAccessService.isOwnerOrAdmin()` (see "Admin access to Search
+Profiles and Users" below — extracted the same day once this exact
+owner-or-admin check needed repeating across several more use cases) —
+same `UserNotFoundError`/`404` for a non-owning, non-admin caller either
+way, same reasoning as above (no enumeration signal from the response). Chosen
+deliberately over the alternative (self-service removed entirely, users
+email/contact an admin to request deletion): that alternative adds real
+friction with no offsetting benefit, and breaks the e2e-cleanup
+prerequisite this endpoint was specifically built for; the admin path is
+additive, not a replacement — same "self-service escape-hatch" shape as
+the `searchProfileLimit` admin override already documented above (the
+lever a paying customer uses themselves also works as a moderation/abuse
+tool for an admin). Checked directly in the use case rather than via a
+second guard, so the controller-level guard config stays simple
+(`JwtAuthGuard` only) and the business rule ("owner or admin") lives in
+one place next to the deletion logic it gates. Deleting a user cascades to
+all of their `SearchProfile`s
+(`SearchProfileRepository.deleteAllByUserId`, added alongside
+`UserRepository.deleteById`) — profiles are deleted first, the `User` row
+second. Same "no Unit-of-Work yet" limitation as the free-tier-limit race
+above — two unsynchronized repository calls, not one transaction, because
+no primitive exists yet to do better — but a different failure shape, and
+the crash-vs-race order tradeoff is worth spelling out rather than just
+citing the same gap twice:
+- **Crash between the two calls** (process dies, e.g. OOM, a deploy
+  restart — not a race, just an interrupted sequence): with profiles-first
+  (current order), the account survives with zero profiles — completely
+  benign, indistinguishable from a user who never created one. Reversed
+  (`User` row first), any profiles that already existed are orphaned
+  *deterministically* — not a probability, guaranteed on every crash that
+  lands in that window.
+- **Concurrent `POST /search-profiles` from the same account racing the
+  deletion** (found in review, 2026-08-16): with profiles-first, a request
+  whose `CreateSearchProfileUseCase.findById(userId)` ownership check
+  passes *before* `deleteAllByUserId` runs, but whose insert lands
+  *after* it, creates one profile that then survives `deleteById` —
+  permanently orphaned, since no future call can ever reach it again (a
+  fresh Telegram login creates a brand-new `User` with a new random
+  `id`, so nothing will ever match the old, deleted one). Unlike the
+  free-tier-limit race, **this one doesn't self-heal** — there's no "next
+  call re-checks reality" for a user that no longer exists to make one.
+  Reversed order would close this specific race (the trailing
+  `deleteAllByUserId` would catch a late insert on its way out) at the
+  cost of reintroducing the deterministic crash-orphan case above.
+
+Kept profiles-first anyway: an interrupted-crash mid-deletion is judged
+more likely in practice than the same account racing itself across two
+endpoints in a millisecond window, and profiles-first is the only order
+where the *common* failure mode (crash) stays fully benign — the residual
+risk (concurrent-create race) is strictly narrower (needs precise timing)
+and its blast radius is smaller (one inert orphan row, not "guaranteed
+orphan every crash"). Not fixed now for the same reason as the free-tier
+race: real severity is low (no security exposure, no data corruption of
+other users' data, just an unreachable row) and closing it properly needs
+the same Unit-of-Work primitive **Roadmap step 5** already schedules — one
+real transaction would fix both gaps at once, so there's no reason to
+build a narrower, one-off fix for this specific case first.
+
+Motivated by two things at once, not built solely for either: a genuine
+self-service data-deletion feature, and the prerequisite the e2e-testing
+Roadmap step already called for (see Roadmap step 4 — test run cleanup
+needed a real API-callable deletion path, since GitHub Actions runners
+can't reach the VPS's Postgres directly).
+- **`UserModule` ⇄ `SearchProfileModule` circular import**, resolved with
+  `forwardRef()` on both sides, same shape as the `UserModule` ⇄
+  `AuthModule` cycle documented above: `SearchProfileModule` already
+  imported `UserModule` (for the free-tier limit check), and now
+  `UserModule` needs `SearchProfileModule`'s `SearchProfileRepository`
+  (newly exported from `SearchProfileModule` for this). This is a second,
+  *different* module pair hitting the same shape — not a third module
+  joining the existing `AuthModule` ⇄ `UserModule` cycle — so the
+  "revisit only if a third module hits the same cycle" note above still
+  hasn't fired; noting it here so the count is easy to find later if a
+  third pair shows up.
+
+**Admin access to Search Profiles and Users (decided + implemented
+2026-08-16):** prompted by a real gap noticed after `DELETE /users/:id`
+shipped — an admin could delete a whole account but had no way to read,
+moderate, or manage an individual `SearchProfile` through the API at
+all, only by hand-editing Postgres via Prisma Studio. Closed with a
+matching pair of decisions, not built ad hoc per endpoint:
+- **`UserAccessService`** (`modules/user/application/UserAccessService.ts`)
+  — `isAdmin(userId)` and `isOwnerOrAdmin(resourceOwnerId, callerId)`,
+  wrapping `UserRepository`. Extracted once the inline
+  `caller.role !== 'admin'` check (originally written directly inside
+  `DeleteUserUseCase`) was about to be copy-pasted into four more use
+  cases (`GetSearchProfileUseCase`, `UpdateSearchProfileUseCase`,
+  `DeleteSearchProfileUseCase`, plus `DeleteUserUseCase` itself) — past
+  the point where "three similar lines" stays simpler than a shared
+  helper. Deliberately *not* a port (no interface + adapter): it's not
+  swappable infrastructure, it's application-layer business logic reusing
+  the already-existing `UserRepository` port, so a single injectable
+  class is the right amount of ceremony. Considered and rejected: a full
+  ABAC library (CASL is the standard NestJS-ecosystem choice) — right
+  tool once the permission model grows past a single binary "owner or
+  admin" rule across a couple of resource types, but real added
+  complexity/dependency weight for what is, today, one rule reused in a
+  handful of places. Revisit if a third role (e.g. moderator) or
+  resource-scoped permissions beyond "own it or be admin" become real.
+- **Every extended check reuses the exact 404-not-403 pattern** already
+  established for ownership (see Security → the five closed enumeration
+  items, and the `DELETE /users/:id` entry above): a non-owning,
+  non-admin caller gets the same "not found" as a genuinely nonexistent
+  id, so the response never signals whether a resource exists to someone
+  who isn't allowed to see it.
+
+What changed, concretely:
+- `GET /users` — a **new, admin-only** endpoint (`ListUsersUseCase`),
+  paginated, with an optional `?search=` filter matched against
+  `telegramUsername` (case-insensitive `contains`). Chosen as the one
+  searchable field deliberately: `telegramUserId` and `id` are both
+  opaque identifiers an admin would already have to look up from
+  somewhere else to type in (defeating the point of a search box), while
+  `telegramUsername` is the one human-recognizable field on `User` —
+  the thing an admin actually has in hand when a support conversation
+  starts ("user @oleh_dev says..."). This is also the prerequisite for
+  every other admin action in this section: `GET /search-profiles/admin`,
+  `PATCH /users/:id/search-profile-limit`, and `DELETE /users/:id` all
+  need a `userId` the admin already has — before this endpoint existed,
+  the only way to find one was Prisma Studio.
+- `GET /search-profiles/:id` and `PATCH /search-profiles/:id` — same
+  routes, extended in place (no new endpoint) from "owner only" to
+  "owner or admin" via `UserAccessService`. Their use case inputs'
+  `userId` field was renamed to `callerId` throughout (`GetSearchProfileInput`,
+  `UpdateSearchProfileInput`) to make the "this is the caller, not
+  necessarily the resource owner" distinction explicit at the type level
+  — matching `DeleteUserUseCase`'s existing `callerId` naming.
+- `DELETE /search-profiles/:id` is a genuinely **new** endpoint — no
+  self-service hard-delete of a single profile existed before this
+  (`archive` was, and remains, the self-service soft-delete: a status
+  transition, not a row removal). Built self-service-plus-admin-override
+  from the start, the same shape as `DELETE /users/:id`, rather than
+  admin-only — an explicit choice over "no self-service delete, contact
+  an admin," made for the same reasons already documented under
+  "Self-service account deletion" above (real feature, no reason to add
+  friction).
+- `GET /search-profiles/admin` — a **new, separate, admin-only** endpoint
+  (not an extension of self-service `GET /search-profiles`, which always
+  means "my own"), listing across all users with pagination and an
+  optional `?userId=` filter. Registered before `GET /search-profiles/:id`
+  in the controller specifically because both are single-segment path
+  patterns under the same resource (`/search-profiles/admin` vs.
+  `/search-profiles/:id`) — Nest/Express match routes in registration
+  order, so the literal `admin` segment must be declared first or it
+  would be swallowed by `:id` and rejected by `ParseUUIDPipe` as a bad
+  UUID instead of ever reaching the admin handler. `POST /search-profiles/admin`
+  has no such ordering concern (different HTTP method, and its path
+  shape doesn't collide with `:id/pause`-style routes either way).
+- `POST /search-profiles/admin` — admin-only, creates a Search Profile
+  for an explicit `userId` in the request body. Deliberately a separate
+  route from self-service `POST /search-profiles`, never a body-level
+  `userId` override accepted on the same endpoint: the self-service route
+  derives ownership from the verified JWT specifically so a client can
+  never claim to act as another user via a request body — accepting a
+  client-supplied `userId` there would silently reopen the exact
+  enumeration/impersonation class of bug the `GET /search-profiles?userId=...`
+  fix already closed (see Security above). Reuses
+  `CreateSearchProfileUseCase` completely unchanged (its `userId` field
+  was always "whose profile this is," not a caller/owner distinction —
+  the self-service controller method already passes the JWT's own id
+  there, the admin one just passes a different, explicit one) — including
+  the free-tier limit check, which still applies to admin-created
+  profiles by design (no separate limit-bypass lever was asked for).
+  Unlike the self-service `create()` handler, `createAdmin()` special-cases
+  `UserNotFoundError` into a `404` rather than folding it into the
+  generic `400` — for self-service that error is practically
+  unreachable (a valid JWT always resolves to a real `User`), but for an
+  admin-supplied, genuinely-arbitrary `userId` it's a real, expected
+  outcome that deserves the more specific status code.
+- **Create/update-on-behalf was a deliberate scope addition, not
+  originally planned**: the first pass through this list covered only
+  read + delete; create/update-on-behalf was added at the user's explicit
+  request as a corner-case escape hatch for unforeseen support
+  situations, accepted even though no concrete scenario existed yet at
+  decision time — consistent with treating an authenticated admin as a
+  trusted operator, same trust level already extended by the
+  `searchProfileLimit` and account-deletion admin levers.
+- **Pagination** (`GET /users`, `GET /search-profiles/admin`) shares one
+  convention: `common/pagination/paginationLimits.ts` exports
+  `DEFAULT_PAGE_LIMIT` (20) and `MAX_PAGE_LIMIT` (100) as named
+  constants — plain `limit`/`offset` query params (not cursor-based),
+  matching this project's general preference for the simplest workable
+  shape until real data volume proves it insufficient. `MAX_PAGE_LIMIT`
+  exists specifically so a caller can't request an unbounded page and
+  turn a "list" endpoint into an accidental full-table scan.
+
 ### SearchPreferences — composite Value Object
 
 ```
@@ -1142,10 +1363,11 @@ backlog:
    full shape. **VPS provisioned, domain pointed** (2026-08-15) — see
    "VPS provisioning" under "Deployment" for the server/domain shape;
    `postgres` + `app` verified live on the server (real login round-trip,
-   real DB write). **Still open**: starting `caddy` and verifying real
-   TLS issuance now that DNS resolves, the real `pg_dump`-to-S3 Postgres
-   backup (Spaceship's AutoBackup is a supplementary whole-disk snapshot,
-   not a substitute — see "Deployment"), and the deploy automation itself
+   real DB write). **`caddy` started, real TLS verified** (2026-08-16) —
+   `https://befirstapp.com` serves the app with a real Let's Encrypt
+   certificate, full stack live. **Still open**: the real `pg_dump`-to-S3
+   Postgres backup (Spaceship's AutoBackup is a supplementary whole-disk
+   snapshot, not a substitute — see "Deployment"), and the deploy automation itself
    (manually-triggered, per the decision above — not built yet).
    - **Swagger stays public on purpose** (not the original "gate it before
      deployment" plan) — the repo is already public, and having the live
@@ -1183,21 +1405,29 @@ backlog:
      GitHub Actions runners have no direct network path to the VPS's
      Postgres (and shouldn't — it isn't meant to be publicly reachable),
      cleanup can't reuse the integration tests' "connect a second
-     `PrismaClient` and delete by id" pattern. Needs a real account-deletion
-     path callable over the API (the e2e suite's own teardown) — likely a
-     `DELETE /users/:id`-shaped self-service endpoint, which is also a
-     legitimate feature on its own (not built solely for test cleanup) —
-     not implemented yet, tracked here as a prerequisite for this step.
-5. **Close the `CreateSearchProfileUseCase` free-tier-limit race** (see
-   Domain → "Monetization limit" → known gap) — add a real Unit-of-Work
-   port so the active/paused count and the insert run inside one Postgres
-   transaction with a row lock on the `User`, instead of two separate,
-   unsynchronized repository calls. Deliberately sequenced here, not fixed
-   immediately when found (2026-08-07): low severity (self-healing,
-   double-click-scale race, no data-integrity or security exposure) doesn't
-   justify introducing a new architectural primitive (nothing in this
-   codebase currently threads one Prisma transaction across two repository
-   adapters) mid-feature — but it should land before DOU brings real,
+     `PrismaClient` and delete by id" pattern — it needs a real
+     account-deletion path callable over the API instead. **Done
+     (2026-08-16):** `DELETE /users/:id` (see Domain → "Self-service
+     account deletion") — a legitimate feature on its own, not built
+     solely for test cleanup, but this is exactly the prerequisite this
+     step was waiting on; the e2e suite's own teardown can now call it
+     directly against the deployed API.
+5. **Add a real Unit-of-Work port**, closing two known gaps at once with
+   the same primitive — a Postgres transaction (with a row lock on the
+   `User` where relevant) threaded across repository calls that are
+   currently separate and unsynchronized:
+   - The `CreateSearchProfileUseCase` free-tier-limit race (see Domain →
+     "Monetization limit" → known gap) — the active/paused count and the
+     insert should run inside one transaction, not two independent calls.
+   - The `DeleteUserUseCase` orphan race (see Domain → "Self-service
+     account deletion" → the crash-vs-race tradeoff) — deleting a user's
+     profiles and the user row should run inside one transaction too.
+   Deliberately sequenced here, not fixed immediately when either was
+   found (2026-08-07, 2026-08-16): both are low severity (no
+   data-integrity or security exposure on *other* users' data) and don't
+   justify introducing a new architectural primitive mid-feature (nothing
+   in this codebase currently threads one Prisma transaction across two
+   repository adapters) — but this should land before DOU brings real,
    possibly-automated write traffic into the picture, not be forgotten
    indefinitely.
 6. **DOU as the first source** (crawl → normalize → register → match),

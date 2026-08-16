@@ -1,4 +1,4 @@
 export interface GetSearchProfileInput {
   id: string;
-  userId: string;
+  callerId: string;
 }

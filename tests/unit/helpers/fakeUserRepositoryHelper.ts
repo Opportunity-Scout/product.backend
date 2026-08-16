@@ -1,4 +1,6 @@
 import { UserRepository } from '@app/modules/user/application/ports/UserRepository';
+import { FindManyUsersParams } from '@app/modules/user/application/ports/interfaces/FindManyUsersParams';
+import { FindManyUsersResult } from '@app/modules/user/application/ports/interfaces/FindManyUsersResult';
 import { User } from '@app/modules/user/domain/User';
 
 export class FakeUserRepository implements UserRepository {
@@ -22,5 +24,26 @@ export class FakeUserRepository implements UserRepository {
 
   findByTelegramUserId(telegramUserId: string): Promise<User | null> {
     return Promise.resolve(this.saved.find((user) => user.telegramUserId === telegramUserId) ?? null);
+  }
+
+  deleteById(id: string): Promise<void> {
+    const index = this.saved.findIndex((user) => user.id === id);
+
+    if (index !== -1) {
+      this.saved.splice(index, 1);
+    }
+
+    return Promise.resolve();
+  }
+
+  findMany(params: FindManyUsersParams): Promise<FindManyUsersResult> {
+    const matching = params.search
+      ? this.saved.filter((user) => user.telegramUsername?.toLowerCase().includes(params.search!.toLowerCase()))
+      : this.saved;
+
+    return Promise.resolve({
+      users: matching.slice(params.offset, params.offset + params.limit),
+      total: matching.length,
+    });
   }
 }
