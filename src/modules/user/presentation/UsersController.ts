@@ -34,6 +34,8 @@ import { UserNotFoundError } from '../application/errors/UserNotFoundError';
 import { AdminGuard } from './AdminGuard';
 import { SetSearchProfileLimitDto } from './dto/SetSearchProfileLimitDto';
 import { ListUsersQueryDto } from './dto/ListUsersQueryDto';
+import { ListUsersResponseDto } from './dto/ListUsersResponseDto';
+import { SetSearchProfileLimitResponseDto } from './dto/SetSearchProfileLimitResponseDto';
 import { toUserResponse } from './userPresenter';
 
 @ApiTags('users')
@@ -51,7 +53,7 @@ export class UsersController {
   @Get()
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'List users, optionally filtered by Telegram username (admin only)' })
-  @ApiOkResponse({ description: 'Paginated list of users' })
+  @ApiOkResponse({ description: 'Paginated list of users', type: ListUsersResponseDto })
   @ApiForbiddenResponse({ description: 'Caller is not an admin' })
   @ApiBadRequestResponse({ description: 'limit or offset out of range' })
   async list(@Query() query: ListUsersQueryDto) {
@@ -68,7 +70,7 @@ export class UsersController {
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: "Set a user's Search Profile limit (admin only)" })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiOkResponse({ description: 'Limit updated' })
+  @ApiOkResponse({ description: 'Limit updated', type: SetSearchProfileLimitResponseDto })
   @ApiForbiddenResponse({ description: 'Caller is not an admin' })
   @ApiBadRequestResponse({ description: 'Malformed id, or limit is not a non-negative integer' })
   @ApiNotFoundResponse({ description: 'No user with this id' })

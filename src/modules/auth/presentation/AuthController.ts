@@ -11,6 +11,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AUTH_LOGIN_THROTTLE_LIMIT, AUTH_LOGIN_THROTTLE_TTL_MS } from '@app/common/rateLimiting/throttleLimits';
 import { LoginWithTelegramUseCase } from '../application/loginWithTelegram/LoginWithTelegramUseCase';
 import { TelegramLoginDto } from './dto/TelegramLoginDto';
+import { LoginResponseDto } from './dto/LoginResponseDto';
 
 // Tracked by the target telegramUserId, not IP — see CLAUDE.md "Trust proxy" for the full reasoning.
 function trackByTelegramUserId(req: Record<string, unknown>): string {
@@ -34,7 +35,7 @@ export class AuthController {
     },
   })
   @ApiOperation({ summary: 'Log in (or sign up) with a Telegram Login Widget payload' })
-  @ApiOkResponse({ description: 'Login succeeded, returns a bearer token' })
+  @ApiOkResponse({ description: 'Login succeeded, returns a bearer token', type: LoginResponseDto })
   @ApiBadRequestResponse({ description: 'Missing or malformed fields in the payload' })
   @ApiUnauthorizedResponse({ description: 'Invalid signature, or the payload is too old' })
   @ApiTooManyRequestsResponse({ description: 'Too many login attempts, try again later' })
