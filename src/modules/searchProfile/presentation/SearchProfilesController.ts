@@ -45,6 +45,8 @@ import { CreateSearchProfileDto } from './dto/CreateSearchProfileDto';
 import { AdminCreateSearchProfileDto } from './dto/AdminCreateSearchProfileDto';
 import { UpdateSearchProfileDto } from './dto/UpdateSearchProfileDto';
 import { ListSearchProfilesAdminQueryDto } from './dto/ListSearchProfilesAdminQueryDto';
+import { SearchProfileResponseDto } from './dto/SearchProfileResponseDto';
+import { ListSearchProfilesAdminResponseDto } from './dto/ListSearchProfilesAdminResponseDto';
 import { toSearchProfileResponse } from './searchProfilePresenter';
 
 @ApiTags('search-profiles')
@@ -68,7 +70,7 @@ export class SearchProfilesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a Search Profile' })
-  @ApiCreatedResponse({ description: 'Search Profile created' })
+  @ApiCreatedResponse({ description: 'Search Profile created', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Invalid name or preferences (e.g. remote=false with no country)' })
   async create(@CurrentUser('id') userId: string, @Body() dto: CreateSearchProfileDto) {
     const result = await this.createSearchProfileUseCase.execute({
@@ -89,7 +91,7 @@ export class SearchProfilesController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Create a Search Profile on behalf of a user (admin only)' })
-  @ApiCreatedResponse({ description: 'Search Profile created' })
+  @ApiCreatedResponse({ description: 'Search Profile created', type: SearchProfileResponseDto })
   @ApiForbiddenResponse({ description: 'Caller is not an admin' })
   @ApiNotFoundResponse({ description: 'No user with the given userId' })
   @ApiBadRequestResponse({ description: 'Invalid name or preferences (e.g. remote=false with no country)' })
@@ -114,7 +116,11 @@ export class SearchProfilesController {
 
   @Get()
   @ApiOperation({ summary: "List the authenticated user's Search Profiles" })
-  @ApiOkResponse({ description: 'The Search Profiles for the authenticated user (possibly empty)' })
+  @ApiOkResponse({
+    description: 'The Search Profiles for the authenticated user (possibly empty)',
+    type: SearchProfileResponseDto,
+    isArray: true,
+  })
   async list(@CurrentUser('id') userId: string) {
     const searchProfiles = await this.listSearchProfilesUseCase.execute({ userId });
 
@@ -124,7 +130,7 @@ export class SearchProfilesController {
   @Get('admin')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'List Search Profiles across all users, optionally filtered by userId (admin only)' })
-  @ApiOkResponse({ description: 'Paginated list of Search Profiles' })
+  @ApiOkResponse({ description: 'Paginated list of Search Profiles', type: ListSearchProfilesAdminResponseDto })
   @ApiForbiddenResponse({ description: 'Caller is not an admin' })
   @ApiBadRequestResponse({ description: 'Malformed userId, or limit/offset out of range' })
   async listAdmin(@Query() query: ListSearchProfilesAdminQueryDto) {
@@ -145,7 +151,7 @@ export class SearchProfilesController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a Search Profile by id (owner or admin)' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiOkResponse({ description: 'Search Profile found' })
+  @ApiOkResponse({ description: 'Search Profile found', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id' })
   @ApiNotFoundResponse({
     description: 'No Search Profile with this id, or the caller is neither its owner nor an admin',
@@ -180,7 +186,7 @@ export class SearchProfilesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Pause a Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiOkResponse({ description: 'Search Profile paused' })
+  @ApiOkResponse({ description: 'Search Profile paused', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is not active' })
   @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async pause(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
@@ -201,7 +207,7 @@ export class SearchProfilesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Activate a paused Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiOkResponse({ description: 'Search Profile activated' })
+  @ApiOkResponse({ description: 'Search Profile activated', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is not paused' })
   @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async activate(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
@@ -222,7 +228,7 @@ export class SearchProfilesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Archive a Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiOkResponse({ description: 'Search Profile archived' })
+  @ApiOkResponse({ description: 'Search Profile archived', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is already archived' })
   @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
   async archive(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
@@ -242,7 +248,7 @@ export class SearchProfilesController {
   @Patch(':id')
   @ApiOperation({ summary: 'Update a Search Profile (owner or admin)' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  @ApiOkResponse({ description: 'Search Profile updated' })
+  @ApiOkResponse({ description: 'Search Profile updated', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, invalid name, or invalid preferences' })
   @ApiNotFoundResponse({
     description: 'No Search Profile with this id, or the caller is neither its owner nor an admin',

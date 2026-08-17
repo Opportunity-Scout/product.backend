@@ -316,6 +316,29 @@ enough metadata, so a DTO field without one shows up as an empty/untyped entry i
 the generated schema. When adding a new endpoint/DTO, annotate it the same way,
 and add `@ApiOperation`/`@ApiResponse` on the controller method.
 
+**Response DTOs are required too (decided + retrofitted 2026-08-17)** — every
+`@ApiOkResponse`/`@ApiCreatedResponse` needs an explicit `type:` pointing at a
+real response DTO class, the same way request DTOs need `@ApiProperty()` on
+every field. Without a `type:`, `@nestjs/swagger` emits only the `description`
+string with no `content`/`schema` at all — not a partial/untyped schema, no
+schema whatsoever. This went unnoticed for months because nothing was
+consuming the generated schemas programmatically; it surfaced the moment
+`tests/e2e/mcp-openapi-server` tried to fetch a real response schema for
+`POST /auth/telegram` and got back a bare `{ "description": "..." }`. Fixed
+across every endpoint in one pass once found, not just the one that
+surfaced it — response DTOs live in each module's `presentation/dto/`
+alongside the request DTOs (`LoginResponseDto`, `SearchProfileResponseDto`
++ `SearchPreferencesResponseDto` for its nested VOs, `ListSearchProfilesAdminResponseDto`,
+`UserResponseDto`, `ListUsersResponseDto`, `SetSearchProfileLimitResponseDto`).
+Response DTOs carry `@ApiProperty()` only — no class-validator decorators
+(`ValidationPipe` never runs against a response body) and no `ClassSerializerInterceptor`
+is registered anywhere in this app, so adding `type:` is purely additive
+Swagger metadata with zero runtime behavior change — verified by generating
+the OpenAPI document in-process and diffing the `responses` node for a few
+endpoints before/after, not just assumed. `@ApiNoContentResponse` (`204`)
+endpoints are the one deliberate exception — a `204` has no body by HTTP
+definition, so there's nothing for a `type:` to describe.
+
 ## Persistence
 
 Local Postgres runs via `docker-compose.yml` (single `postgres:18-alpine`
