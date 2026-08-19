@@ -1,0 +1,23 @@
+{
+  "name": "product-backend-e2e",
+  "version": "0.0.1",
+  "description": "End-to-end tests for the BeFirst Product Backend API — run against the real deployed environment",
+  "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "engines": {
+    "node": "^22"
+  },
+  "scripts": {
+    "test": "node --env-file=.env node_modules/.bin/playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.20.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "json-schema-to-ts": "^3.1.1",
+    "typescript": "^7.0.2",
+    "uuid": "^14.0.1"
+  }
+}

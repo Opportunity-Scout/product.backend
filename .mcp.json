@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "befirst-openapi-schema-reader": {
+      "command": "node",
+      "args": ["tests/e2e/mcp-openapi-server/dist/index.js"],
+      "env": {
+        "OPENAPI_URL": "https://befirstapp.com/product-backend-api/swagger-json"
+      }
+    }
+  }
+}
