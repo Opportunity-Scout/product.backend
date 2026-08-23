@@ -846,11 +846,24 @@ serves the app end-to-end (`GET /health`, the Swagger UI) with no browser
 TLS warning — the full stack (`postgres` + `app` + `caddy`) is live.
 
 **Deploy trigger stays manual, not continuous-on-push** (decided
-2026-08-08) — the automation itself (a GitHub Actions job that SSHes into
-the VPS and redeploys) is deliberately not built yet; when it is, it must
-be manually triggered (e.g. `workflow_dispatch`), not run automatically on
-every push to `main` the way the integration-tests workflow is. Revisit
-only if manual triggering becomes a real friction point, not by default.
+2026-08-08, automated 2026-08-23) — `.github/workflows/deploy.yml` SSHes
+into the VPS (`appleboy/ssh-action`, pinned to `v1.2.5`, not a floating
+tag) and runs the same steps previously done by hand: `git pull`,
+`docker compose up -d --build app` (scoped to `app` only — `postgres`/
+`caddy` have no `build:` of their own), then `docker compose exec -T app
+npx prisma migrate deploy` — added as an unconditional step even though
+the prior manual routine sometimes skipped it, since it's a no-op when
+there's nothing pending and closes a real "shipped code expecting a
+schema migration that never ran" class of bug for free. Triggered via
+`workflow_dispatch` — a manual "Run workflow" button in the GitHub
+Actions UI — deliberately not on every push to `main` the way the
+integration-tests workflow is. Revisit only if manual triggering becomes
+a real friction point, not by default. The SSH private key lives in the
+`DEPLOY_SSH_KEY` repository secret, paired with a dedicated deploy
+keypair (not anyone's personal key) added to `~deploy/.ssh/authorized_keys`
+on the VPS. Host/port/user (`befirstapp.com`/`22022`/`deploy`) aren't
+secret — already public in this file — so they're inlined directly in
+the workflow, not duplicated into secrets that would just need to match.
 
 **Known, deliberate gap (2026-08-16): redeploy causes a brief downtime,
 not zero-downtime.** `docker compose up -d --build` builds the new `app`
