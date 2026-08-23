@@ -7,7 +7,7 @@ export class ListUsersQueryDto {
   @ApiPropertyOptional({ description: 'Filter by a Telegram username substring (case-insensitive)' })
   @IsOptional()
   @IsString()
-  search?: string;
+  telegramUsername?: string;
 
   @ApiPropertyOptional({ default: DEFAULT_PAGE_LIMIT, maximum: MAX_PAGE_LIMIT })
   @IsOptional()

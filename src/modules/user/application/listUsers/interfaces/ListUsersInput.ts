@@ -1,5 +1,5 @@
 export interface ListUsersInput {
-  search?: string;
+  telegramUsername?: string;
   limit: number;
   offset: number;
 }

@@ -1,5 +1,5 @@
 export interface FindManyUsersParams {
-  search?: string;
+  telegramUsername?: string;
   limit: number;
   offset: number;
 }

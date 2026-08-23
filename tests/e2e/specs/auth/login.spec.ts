@@ -12,7 +12,11 @@ test.describe('POST /auth/telegram', () => {
     const loginResponse = await backendApi.auth.login(newUserLoginPayload);
     const loginResponseBody = await responseContract.validate(loginResponse, httpStatus.OK, LoginResponseSchema);
     const adminAccessToken = await apiHelper.getAdminAccessToken();
-    const listResponse = await backendApi.users.list(adminAccessToken, { search: newUserLoginPayload.username });
+
+    const listResponse = await backendApi.users.list(adminAccessToken, {
+      telegramUsername: newUserLoginPayload.username,
+    });
+
     const listBody = await responseContract.validate(listResponse, httpStatus.OK, ListUsersResponseSchema);
     const [loggedInUser] = listBody.users;
 

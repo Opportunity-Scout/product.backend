@@ -18,7 +18,7 @@ describe('ListUsersUseCase', () => {
     const match = buildUser({ id: 'user-1', telegramUsername: 'oleh_dev' });
     userRepository.saved.push(match, buildUser({ id: 'user-2', telegramUsername: 'someone_else' }));
     const useCase = new ListUsersUseCase(userRepository);
-    const result = await useCase.execute({ search: 'oleh', limit: 20, offset: 0 });
+    const result = await useCase.execute({ telegramUsername: 'oleh', limit: 20, offset: 0 });
 
     expect(result.users).toEqual([match]);
     expect(result.total).toBe(1);
