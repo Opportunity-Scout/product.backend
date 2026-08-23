@@ -1,0 +1,24 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: befirstapp.com
+          port: 22022
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ~/product.backend
+            git pull
+            docker compose up -d --build app
+            docker compose exec -T app npx prisma migrate deploy
