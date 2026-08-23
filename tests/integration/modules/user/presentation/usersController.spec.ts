@@ -79,7 +79,7 @@ describe('UsersController (integration)', () => {
 
       const response = await request(app.getHttpServer())
         .get('/users')
-        .query({ search: searchTerm, limit: 1, offset: 0 })
+        .query({ telegramUsername: searchTerm, limit: 1, offset: 0 })
         .set('Authorization', authHeader(admin.token));
 
       const body = response.body as { total: number; limit: number; offset: number; users: unknown[] };

@@ -1181,8 +1181,11 @@ matching pair of decisions, not built ad hoc per endpoint:
 
 What changed, concretely:
 - `GET /users` — a **new, admin-only** endpoint (`ListUsersUseCase`),
-  paginated, with an optional `?search=` filter matched against
-  `telegramUsername` (case-insensitive `contains`). Chosen as the one
+  paginated, with an optional `?telegramUsername=` filter matched against
+  `telegramUsername` (case-insensitive `contains`) — named `search`
+  originally, renamed 2026-08-23 once a review caught that a generic
+  "search" name didn't say what it actually filters on, unlike every
+  other query param in this codebase. Chosen as the one
   searchable field deliberately: `telegramUserId` and `id` are both
   opaque identifiers an admin would already have to look up from
   somewhere else to type in (defeating the point of a search box), while

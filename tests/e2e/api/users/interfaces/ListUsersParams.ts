@@ -1,5 +1,5 @@
 export interface ListUsersParams {
-  search?: string;
+  telegramUsername?: string;
   limit?: number;
   offset?: number;
 }

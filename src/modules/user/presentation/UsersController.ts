@@ -58,7 +58,7 @@ export class UsersController {
   @ApiBadRequestResponse({ description: 'limit or offset out of range' })
   async list(@Query() query: ListUsersQueryDto) {
     const { users, total } = await this.listUsersUseCase.execute({
-      search: query.search,
+      telegramUsername: query.telegramUsername,
       limit: query.limit,
       offset: query.offset,
     });

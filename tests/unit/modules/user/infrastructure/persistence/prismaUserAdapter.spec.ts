@@ -118,7 +118,7 @@ describe('PrismaUserAdapter', () => {
   it('filters by a case-insensitive telegramUsername search term', async () => {
     const fakePrisma = buildFakePrismaService();
     const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
-    await adapter.findMany({ search: 'oleh', limit: 20, offset: 0 });
+    await adapter.findMany({ telegramUsername: 'oleh', limit: 20, offset: 0 });
     const findManyCall = fakePrisma.user.findMany.mock.calls[0][0];
     const countCall = fakePrisma.user.count.mock.calls[0][0];
 

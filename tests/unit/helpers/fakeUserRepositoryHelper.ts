@@ -37,8 +37,10 @@ export class FakeUserRepository implements UserRepository {
   }
 
   findMany(params: FindManyUsersParams): Promise<FindManyUsersResult> {
-    const matching = params.search
-      ? this.saved.filter((user) => user.telegramUsername?.toLowerCase().includes(params.search!.toLowerCase()))
+    const matching = params.telegramUsername
+      ? this.saved.filter((user) =>
+          user.telegramUsername?.toLowerCase().includes(params.telegramUsername!.toLowerCase()),
+        )
       : this.saved;
 
     return Promise.resolve({

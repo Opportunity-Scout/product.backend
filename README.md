@@ -258,7 +258,7 @@ hand (`npm run prisma:studio`, or `UPDATE users SET role = 'admin' WHERE id
 An admin can also list users, and read/manage any Search Profile:
 
 ```bash
-curl "http://localhost:3000/users?search=oleh&limit=20&offset=0" \
+curl "http://localhost:3000/users?telegramUsername=oleh&limit=20&offset=0" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 
 curl "http://localhost:3000/search-profiles/admin?userId=<user-id>&limit=20&offset=0" \

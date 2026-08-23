@@ -50,7 +50,7 @@ tests/e2e/
       interfaces/           TelegramLoginFields, TelegramLoginPayload
     users/
       UsersApi.ts          wraps GET /users (admin-only)
-      interfaces/           ListUsersParams (search, limit, offset)
+      interfaces/           ListUsersParams (telegramUsername, limit, offset)
   helpers/             Test-oriented utilities — stateless singletons by
                         default (see "Helpers" below for the one exception)
     commonHelper.ts       e.g. Telegram Login Widget HMAC signing
@@ -349,7 +349,7 @@ before this suite is treated as safe to run repeatedly against prod.
 ## E2E admin identity (added 2026-08-18, revised 2026-08-19)
 
 Verifying that `POST /auth/telegram` actually persists a `User` row needs
-reading it back through the API — `GET /users?search=...` is the only way
+reading it back through the API — `GET /users?telegramUsername=...` is the only way
 (no direct Postgres access from CI, see above) — but that endpoint is
 admin-only (`AdminGuard` on top of `JwtAuthGuard`, see root `CLAUDE.md` →
 "Admin access to Search Profiles and Users"), and a freshly-created `User`
@@ -399,9 +399,12 @@ separate identity that's actually an admin.
 - **`api/users/UsersApi.ts`** — wraps `GET /users`
   (`list(accessToken, params?: ListUsersParams)`, bearer auth via header).
   `ListUsersParams` (`api/users/interfaces/`) mirrors the live query params
-  (`search`, `limit`, `offset`) — `search` is named to match the server's
-  actual `ListUsersQueryDto.search`, not renamed on the client side; if
-  that name changes, it changes on the server first, as its own decision.
+  (`telegramUsername`, `limit`, `offset`) — named to match the server's
+  actual `ListUsersQueryDto` field, not renamed on the client side.
+  `telegramUsername` was originally `search` on both the server and this
+  client — renamed together 2026-08-23 (see root `CLAUDE.md` → "Admin
+  access to Search Profiles and Users") once review caught that a generic
+  "search" name didn't say what it actually filters on.
   `list()` builds a `URLSearchParams` from whichever params are actually
   set, skipping `undefined` — chosen over widening `ListUsersParams` with
   an index signature (would silently accept unrelated extra keys) or

@@ -58,8 +58,8 @@ export class PrismaUserAdapter implements UserRepository {
   }
 
   async findMany(params: FindManyUsersParams): Promise<FindManyUsersResult> {
-    const where: Prisma.UserWhereInput = params.search
-      ? { telegramUsername: { contains: params.search, mode: 'insensitive' } }
+    const where: Prisma.UserWhereInput = params.telegramUsername
+      ? { telegramUsername: { contains: params.telegramUsername, mode: 'insensitive' } }
       : {};
 
     const [rows, total] = await Promise.all([
