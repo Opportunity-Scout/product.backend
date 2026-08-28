@@ -17,7 +17,7 @@ test.describe('POST /auth/telegram', () => {
     await backendApi.users.delete(loginResponseBody.token, user.id);
   });
 
-  test('Logs in a new user and returns a bearer token', async ({ backendApi, apiHelper, responseContract }) => {
+  test('Logs in a new user and returns a bearer token', { tag: '@T2ec3d41f' }, async ({ backendApi, apiHelper, responseContract }) => {
     const loginResponse = await backendApi.auth.login(newUserLoginPayload);
     loginResponseBody = await responseContract.validate(loginResponse, httpStatus.OK, LoginResponseSchema);
     const adminAccessToken = await apiHelper.getAdminAccessToken();

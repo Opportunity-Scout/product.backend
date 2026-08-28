@@ -1,9 +1,12 @@
 import { test as base, expect } from '@playwright/test';
+import { linkTest } from '@testomatio/reporter';
 import { BackendApi } from '../api/BackendApi';
 import { ApiHelper } from '../helpers/apiHelper';
 import { responseContract } from '../helpers/responseContractHelper';
 import { BASE_URL } from '../constants';
 import { Fixtures, WorkerFixtures } from './interfaces';
+
+const TESTOMATIO_TAG_PATTERN = /^@(T[0-9a-f]{8})$/;
 
 export const test = base.extend<Fixtures, WorkerFixtures>({
   backendApi: [
@@ -36,6 +39,21 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
       await use(new ApiHelper(backendApi.auth, adminTelegramUserId));
     },
     { scope: 'worker' },
+  ],
+  linkTestomatioTag: [
+    // eslint-disable-next-line no-empty-pattern
+    async ({}, use, testInfo) => {
+      testInfo.tags.forEach((tag) => {
+        const match = tag.match(TESTOMATIO_TAG_PATTERN);
+
+        if (match) {
+          linkTest(match[1]);
+        }
+      });
+
+      await use();
+    },
+    { auto: true },
   ],
 });
 
