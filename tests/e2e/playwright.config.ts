@@ -5,7 +5,7 @@ export default defineConfig({
   testDir: './specs',
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,
-  reporter: 'list',
+  reporter: process.env.TESTOMATIO ? [['list'], ['@testomatio/reporter/playwright', { apiKey: process.env.TESTOMATIO }]] : 'list',
   use: {
     baseURL: BASE_URL,
     extraHTTPHeaders: { 'Content-Type': 'application/json' },

@@ -22,11 +22,20 @@ Playwright (`@playwright/test`), TypeScript, Node 22 — versions pinned in
 added (`npm view <pkg> version`), not assumed from memory, same reasoning as
 the root project's "docs/training data lag reality" principle.
 
-Environment variables (`BASE_URL`, `TELEGRAM_BOT_TOKEN`) load via Node's
-native `--env-file` flag (`npm test` → `node --env-file=.env ...`), not the
+Environment variables (`BASE_URL`, `TELEGRAM_BOT_TOKEN`,
+`ADMIN_TELEGRAM_USER_ID`) load via Node's native `--env-file-if-exists`
+flag (`npm test` → `node --env-file-if-exists=.env ...`), not the
 `dotenv` package — mirrors the root project's own reasoning (see root
-`CLAUDE.md` → "Environment variables"): no dependency needed for two env
-vars, and Node already does this natively.
+`CLAUDE.md` → "Environment variables"): no dependency needed for a
+handful of env vars, and Node already does this natively.
+**`--env-file-if-exists`, not `--env-file`** (switched 2026-08-28, CI):
+plain `--env-file` throws (`node: .env: not found`, exit code 9) if the
+file is missing — fine locally where `.env` always exists, but CI has no
+`.env` file at all, injecting these same variables directly as real
+process env vars via the GitHub Actions `secrets` context instead. The
+`-if-exists` variant loads the file when present and is a silent no-op
+when it isn't, so the exact same `npm test` command works in both
+places without branching on `process.env.CI`.
 
 `tests/e2e/.gitignore` (added 2026-08-17) covers what the root
 `.gitignore`'s blanket `node_modules/`/`dist/`/`.env` rules don't reach:
@@ -50,8 +59,7 @@ tests/e2e/
       interfaces/           TelegramLoginFields, TelegramLoginPayload
     users/
       UsersApi.ts          wraps GET /users (admin-only) and DELETE /users/:id
-      interfaces/           ListUsersParams (telegramUsername, limit, offset),
-                             CreatedUser (token + userId, for test cleanup tracking)
+      interfaces/           ListUsersParams, User, GetUsersListResponse
   helpers/             Test-oriented utilities — stateless singletons by
                         default (see "Helpers" below for the one exception)
     commonHelper.ts       e.g. Telegram Login Widget HMAC signing
@@ -155,13 +163,7 @@ decided independently for this sub-project rather than assumed. Unlike the
 root project (which deliberately avoids barrel files outside one narrow
 exception), every `interfaces/` folder here gets an `index.ts` barrel —
 decided for this project specifically, for import convenience, not
-inherited from root. Genuinely test-only bookkeeping types (e.g.
-`CreatedUser`, tracking `{ token, userId }` pairs for cleanup) still get
-this treatment even though nothing about them is an "API contract" — they
-sit next to the API class most related to what they're used for
-(`CreatedUser` → `api/users/interfaces/`, since it pairs with
-`UsersApi.delete()`), not inline in whichever spec happens to use them
-first.
+inherited from root.
 
 **Constants** (`constants/`) hold anything that would otherwise be a magic
 string or number repeated across specs/API classes: route paths
@@ -360,12 +362,22 @@ not a second `PrismaClient` connection the way integration tests do it.
 **Cleanup wired up (2026-08-27, revised 2026-08-28), closing the gap open
 since 2026-08-17.** `UsersApi.delete(accessToken, userId)` wraps `DELETE
 /users/:id` (self-service — each created user deletes itself, no admin
-token needed for this). `specs/auth/login.spec.ts` pushes a `CreatedUser`
-(`{ token, userId }`, `api/users/interfaces/`) onto a module-level
-`createdUsers` array right after a successful login (`userId` comes from
-the admin-search response body, not a decoded JWT — already fetched for
-the assertions, so no extra decode needed), and a single `test.afterAll`
-deletes everything collected once, after all tests in the file have run.
+token needed for this). `specs/auth/login.spec.ts` tracks the one user it
+creates via two `describe`-scoped `let` variables (`loginResponseBody`,
+`user`), assigned inside the test body, and a single `test.afterAll`
+reads them back to call `delete(loginResponseBody.token, user.id)` —
+`user.id` comes from the admin-search response body, not a decoded JWT,
+since it's already fetched for the assertions anyway.
+
+**Two `let`s, not a tracking array** — an earlier draft of this pushed
+`{ token, userId }` pairs onto a module-level `createdUsers` array (with
+its own `CreatedUser` interface in `api/users/interfaces/`) so `afterAll`
+could loop and delete every entry, sized for "however many users this
+file's tests create." Simplified once it was clear this file has exactly
+one test creating exactly one user, so the array was solving a problem
+that doesn't exist yet — the `CreatedUser` interface doesn't exist in the
+codebase currently either. Reintroduce both, if a second test in this
+`describe` starts creating its own user too — not before.
 
 **Deliberately `afterAll`, not `afterEach`** — batches cleanup into one
 pass regardless of how many tests in the file create a user, rather than
@@ -393,9 +405,9 @@ The payoff: `afterAll` now reads exactly like a normal test body —
 `test.afterAll(async ({ backendApi }) => { ... })` — no special-cased
 context construction left in the spec at all.
 
-This pattern (module-level tracking array + `afterAll` teardown) is
-specific to this one spec file for now — extract it into a shared helper
-once a second spec needs the same shape, not before.
+This pattern (`describe`-scoped tracking variables + `afterAll` teardown)
+is specific to this one spec file for now — extract it into a shared
+helper once a second spec needs the same shape, not before.
 
 ## E2E admin identity (added 2026-08-18, revised 2026-08-19)
 
@@ -468,3 +480,55 @@ separate identity that's actually an admin.
 - Not treated as a generic "admin API client for testing admin features"
   — scoped to what this one persistence check needs. Extend it if/when a
   real admin-focused e2e test is written.
+
+## CI: running against a live deploy (added 2026-08-28)
+
+`.github/workflows/e2e-tests.yml` runs this suite automatically after a
+successful deploy — `workflow_run`, watching the root project's `Deploy`
+workflow (`.github/workflows/deploy.yml`, root `CLAUDE.md` → "Deploy
+trigger stays manual"), gated on `github.event.workflow_run.conclusion
+== 'success'`. Deliberately a separate workflow file from `Deploy`
+itself, not a step tacked onto it — different concerns (deploying vs.
+verifying) and different failure semantics (an e2e failure shouldn't
+read as a failed deploy in the Actions UI). No `workflow_dispatch` on
+this one — it only makes sense to run after a real deploy, so there's no
+manual "run it standalone" case worth wiring up separately.
+
+Steps: `actions/checkout@v4`, `actions/setup-node@v4` (Node 22, npm cache
+keyed off `tests/e2e/package-lock.json` specifically — a different lockfile
+than the root project's), `npm ci` and `npm test` both run with
+`working-directory: tests/e2e` (this is its own npm project, not something
+`npm ci` at the repo root would touch).
+
+**Secrets** (GitHub repo Settings → Secrets and variables → Actions):
+`TELEGRAM_BOT_TOKEN`, `ADMIN_TELEGRAM_USER_ID` — same values as
+`tests/e2e/.env` locally, injected as real process env vars via the step's
+`env:` block. No secret named `BASE_URL` — the `constants/index.ts`
+default (`https://befirstapp.com`) is already correct for where this
+actually needs to point, so there's nothing to override.
+
+**Testomat.io reporting (added 2026-08-28).** `@testomatio/reporter`
+(`^2.14.0`), configured in `playwright.config.ts`: `reporter` is `'list'`
+as before when `TESTOMATIO` isn't set (plain local runs), or `[['list'],
+['@testomatio/reporter/playwright', { apiKey: process.env.TESTOMATIO }]]`
+when it is — so the exact same `npm test` command works locally
+(no reporting, nothing to configure) and in CI (reports automatically,
+since the `TESTOMATIO` secret is only present there). The `list` reporter
+stays alongside it deliberately, not replaced — still want readable
+console output for a run watched live, Testomat.io is an addition, not a
+swap. Secret name matches the env var the library itself reads
+(`TESTOMATIO`), so no remapping needed in the workflow.
+
+**Known, accepted risk:** `@testomatio/reporter` unconditionally depends
+on `@cucumber/cucumber` (a hard dependency, not optional/peer) even though
+only the Playwright adapter (`@testomatio/reporter/playwright`) is ever
+used — `npm audit` flags real vulnerabilities inside that unused Cucumber
+dependency chain (`tmp` ≤0.2.5, high; `uuid` <11.1.1, moderate). Accepted
+2026-08-28: the vulnerable code path is never reached by anything this
+project's code calls (no Cucumber usage anywhere), and the only "fix" npm
+offers is downgrading to a ~2-years-old pre-1.0 release, not a real
+option. Revisit if `@testomatio/reporter` ever splits Cucumber support
+into an optional dependency, or if a lighter integration (Testomat.io's
+REST API directly, fed by Playwright's own `json` reporter — considered
+and rejected here in favor of the officially maintained package) becomes
+worth revisiting.
