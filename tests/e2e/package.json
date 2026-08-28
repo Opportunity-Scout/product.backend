@@ -8,11 +8,12 @@
     "node": "^22"
   },
   "scripts": {
-    "test": "node --env-file=.env node_modules/.bin/playwright test",
+    "test": "node --env-file-if-exists=.env node_modules/.bin/playwright test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "@testomatio/reporter": "^2.14.0",
     "@types/node": "^22.20.1",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

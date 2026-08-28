@@ -1420,8 +1420,18 @@ backlog:
    tier checked at the cheapest point that still catches what it's meant
    to). Also a deliberate portfolio choice, not just a testing-pyramid
    checkbox — the user works as a QA/test engineer and wants E2E coverage
-   as a visible skill demonstration. Decided (2026-08-08), not yet
-   implemented:
+   as a visible skill demonstration. Decided (2026-08-08). **Scaffold +
+   first spec built (2026-08-17/19)**, own sub-project at `tests/e2e/`
+   (see its own `CLAUDE.md` for the full design — separate `package.json`,
+   API client layer, AJV response-contract validation against schemas
+   pulled live from the deployed OpenAPI spec). **Wired into CI
+   (2026-08-28)**: `.github/workflows/e2e-tests.yml` runs the suite
+   automatically after a successful `Deploy` run (`workflow_run` trigger),
+   with results also reported to Testomat.io (`@testomatio/reporter`,
+   only active when the `TESTOMATIO` secret is set — see e2e `CLAUDE.md`
+   → "CI: running against a live deploy" for the config shape and a
+   known, accepted `npm audit` finding in that package's unused Cucumber
+   dependency chain).
    - **Auth resolved** — how the e2e tests authenticate (previously an open
      question) is answered the same way the integration tests already
      do it: sign a real Telegram Login Widget payload with the shared
@@ -1449,8 +1459,9 @@ backlog:
      (2026-08-16):** `DELETE /users/:id` (see Domain → "Self-service
      account deletion") — a legitimate feature on its own, not built
      solely for test cleanup, but this is exactly the prerequisite this
-     step was waiting on; the e2e suite's own teardown can now call it
-     directly against the deployed API.
+     step was waiting on. **Wired into the e2e suite itself (2026-08-27):**
+     `login.spec.ts`'s `test.afterAll` now calls it directly against the
+     deployed API — no orphan `User` rows left behind by a run.
 5. **Add a real Unit-of-Work port**, closing two known gaps at once with
    the same primitive — a Postgres transaction (with a row lock on the
    `User` where relevant) threaded across repository calls that are

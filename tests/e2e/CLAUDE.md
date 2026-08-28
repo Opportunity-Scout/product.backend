@@ -22,11 +22,20 @@ Playwright (`@playwright/test`), TypeScript, Node 22 — versions pinned in
 added (`npm view <pkg> version`), not assumed from memory, same reasoning as
 the root project's "docs/training data lag reality" principle.
 
-Environment variables (`BASE_URL`, `TELEGRAM_BOT_TOKEN`) load via Node's
-native `--env-file` flag (`npm test` → `node --env-file=.env ...`), not the
+Environment variables (`BASE_URL`, `TELEGRAM_BOT_TOKEN`,
+`ADMIN_TELEGRAM_USER_ID`) load via Node's native `--env-file-if-exists`
+flag (`npm test` → `node --env-file-if-exists=.env ...`), not the
 `dotenv` package — mirrors the root project's own reasoning (see root
-`CLAUDE.md` → "Environment variables"): no dependency needed for two env
-vars, and Node already does this natively.
+`CLAUDE.md` → "Environment variables"): no dependency needed for a
+handful of env vars, and Node already does this natively.
+**`--env-file-if-exists`, not `--env-file`** (switched 2026-08-28, CI):
+plain `--env-file` throws (`node: .env: not found`, exit code 9) if the
+file is missing — fine locally where `.env` always exists, but CI has no
+`.env` file at all, injecting these same variables directly as real
+process env vars via the GitHub Actions `secrets` context instead. The
+`-if-exists` variant loads the file when present and is a silent no-op
+when it isn't, so the exact same `npm test` command works in both
+places without branching on `process.env.CI`.
 
 `tests/e2e/.gitignore` (added 2026-08-17) covers what the root
 `.gitignore`'s blanket `node_modules/`/`dist/`/`.env` rules don't reach:
@@ -49,20 +58,25 @@ tests/e2e/
       AuthApi.ts          wraps POST /auth/telegram — one method, login(fields)
       interfaces/           TelegramLoginFields, TelegramLoginPayload
     users/
-      UsersApi.ts          wraps GET /users (admin-only)
-      interfaces/           ListUsersParams (telegramUsername, limit, offset)
+      UsersApi.ts          wraps GET /users (admin-only) and DELETE /users/:id
+      interfaces/           ListUsersParams, User, GetUsersListResponse
   helpers/             Test-oriented utilities — stateless singletons by
                         default (see "Helpers" below for the one exception)
     commonHelper.ts       e.g. Telegram Login Widget HMAC signing
     responseContractHelper.ts    AJV-based ResponseContract.validate(response, status, schema)
     jwtHelper.ts          JwtHelper.expectTokenIsValid(token) — decode-only JWT claim checks
-    apiHelper.ts          ApiHelper.getAdminAccessToken() — the one stateful,
-                           per-test-constructed exception; see "E2E admin identity"
+    apiHelper.ts          ApiHelper.getAdminAccessToken() — the one stateful
+                           exception; see "E2E admin identity"
     interfaces/
   fixtures/            Playwright fixture wiring
     test.ts               the one base.extend() point; every spec imports test/expect from here
-    interfaces/
+    interfaces/            Fixtures (test-scoped), WorkerFixtures (worker-scoped)
   constants/           No magic strings/numbers
+    index.ts               barrel — re-exports routes.ts/httpStatus.ts and hosts
+                            one-off values directly (e.g. BASE_URL) rather than
+                            giving every single constant its own file. A second,
+                            deliberate exception to "no barrels" (the first is
+                            interfaces/ folders) — see below.
     routes.ts             API paths, grouped by domain — mirrors api/'s structure
     httpStatus.ts          HTTP status codes actually asserted on (grows as tests need more, not pre-filled)
   testData/            Input payloads for specs, one subfolder per
@@ -116,15 +130,17 @@ test.
 **`ApiHelper` (`helpers/apiHelper.ts`) is a deliberate exception to
 "helpers are stateless singletons"** (added 2026-08-18, see "E2E admin
 identity" below): it's a real class with constructor state (`AuthApi`,
-`adminTelegramUserId`), constructed fresh per test via the `apiHelper`
-fixture, not a `export const x = new X()` singleton. It earns the
-exception because its job — composing a raw `AuthApi` call into "give me a
-ready-to-use admin token" — genuinely needs per-test wiring (which
-`AuthApi` instance, which admin id) the way `commonHelper`/`jwtHelper`
-never do. Named `helpers/` rather than `api/` anyway, on purpose: it calls
-`AuthApi.login()` (the one real `api/`-layer method) and layers
-test-oriented convenience on top (build the admin-specific fields, throw a
-plain error on a bad status, cache the token) — `api/` classes stay raw
+`adminTelegramUserId`), constructed via the `apiHelper` fixture (worker-
+scoped since 2026-08-28 — one instance per worker, not one per test; see
+"Test data & cleanup" for why), not a `export const x = new X()`
+singleton. It earns the exception because its job — composing a raw
+`AuthApi` call into "give me a ready-to-use admin token" — genuinely needs
+constructor wiring (which `AuthApi` instance, which admin id) the way
+`commonHelper`/`jwtHelper` never do. Named `helpers/` rather than `api/`
+anyway, on purpose: it calls `AuthApi.login()` (the one real `api/`-layer
+method) and layers test-oriented convenience on top (build the
+admin-specific fields, throw a plain error on a bad status, cache the
+token) — `api/` classes stay raw
 HTTP wrappers with zero opinions about *why* a call is being made.
 
 **`{}`, not `_`, for a dependency-less fixture's first argument** (fixed
@@ -141,18 +157,24 @@ pattern". The lint rule loses to Playwright's runtime requirement here —
 on that one fixture.
 
 **Interfaces** live in a sibling `interfaces/` folder next to whatever uses
-them (`helpers/interfaces/`, `fixtures/interfaces/`) — same "logic here,
-contracts there" separation the root project applies, decided independently
-for this sub-project rather than assumed. Unlike the root project (which
-deliberately avoids barrel files outside one narrow exception), every
-`interfaces/` folder here gets an `index.ts` barrel — decided for this
-project specifically, for import convenience, not inherited from root.
+them (`helpers/interfaces/`, `fixtures/interfaces/`, `api/*/interfaces/`) —
+same "logic here, contracts there" separation the root project applies,
+decided independently for this sub-project rather than assumed. Unlike the
+root project (which deliberately avoids barrel files outside one narrow
+exception), every `interfaces/` folder here gets an `index.ts` barrel —
+decided for this project specifically, for import convenience, not
+inherited from root.
 
 **Constants** (`constants/`) hold anything that would otherwise be a magic
 string or number repeated across specs/API classes: route paths
 (`routes.ts`, grouped by domain, mirroring `api/`'s own structure) and HTTP
 status codes (`httpStatus.ts`) actually asserted on somewhere — not a
-speculative full list of every possible status up front.
+speculative full list of every possible status up front. **Also has an
+`index.ts` barrel** (added 2026-08-28) — a second, deliberate exception to
+"no barrels outside `interfaces/`": re-exports `routes.ts`/`httpStatus.ts`,
+and hosts genuinely one-off values (`BASE_URL`) directly in the barrel
+itself rather than giving a single primitive its own file. Every consumer
+now imports from `../../constants`, not individual files.
 
 **Response schema validation** (`schemas/`, implemented 2026-08-17): AJV
 validates each response body against a JSON Schema, asserted through the
@@ -337,14 +359,55 @@ via login, possibly `SearchProfile`s later) — same reasoning as root
 from CI, so cleanup has to go through the real API (`DELETE /users/:id`),
 not a second `PrismaClient` connection the way integration tests do it.
 
-**Known, deliberate gap (2026-08-17, still open 2026-08-18): no cleanup
-wired up yet.** `specs/auth/login.spec.ts` logs in and leaves the created
-`User` row in place. `UsersApi` now exists (added 2026-08-18, see "E2E
-admin identity" below) but only wraps `GET /users` so far — `DELETE
-/users/:id` isn't wired into it yet. Not fixed immediately: cleanup needs
-its own fixture (create in setup, delete in teardown), not a one-off hack
-in the first spec. Revisit once a real teardown pattern is needed —
-before this suite is treated as safe to run repeatedly against prod.
+**Cleanup wired up (2026-08-27, revised 2026-08-28), closing the gap open
+since 2026-08-17.** `UsersApi.delete(accessToken, userId)` wraps `DELETE
+/users/:id` (self-service — each created user deletes itself, no admin
+token needed for this). `specs/auth/login.spec.ts` tracks the one user it
+creates via two `describe`-scoped `let` variables (`loginResponseBody`,
+`user`), assigned inside the test body, and a single `test.afterAll`
+reads them back to call `delete(loginResponseBody.token, user.id)` —
+`user.id` comes from the admin-search response body, not a decoded JWT,
+since it's already fetched for the assertions anyway.
+
+**Two `let`s, not a tracking array** — an earlier draft of this pushed
+`{ token, userId }` pairs onto a module-level `createdUsers` array (with
+its own `CreatedUser` interface in `api/users/interfaces/`) so `afterAll`
+could loop and delete every entry, sized for "however many users this
+file's tests create." Simplified once it was clear this file has exactly
+one test creating exactly one user, so the array was solving a problem
+that doesn't exist yet — the `CreatedUser` interface doesn't exist in the
+codebase currently either. Reintroduce both, if a second test in this
+`describe` starts creating its own user too — not before.
+
+**Deliberately `afterAll`, not `afterEach`** — batches cleanup into one
+pass regardless of how many tests in the file create a user, rather than
+tearing down after every individual test.
+
+**`afterAll` takes `{ backendApi }` directly, like any test** (revised
+2026-08-28, review) — first attempt had `afterAll` construct its own
+`APIRequestContext` by hand via the standalone `request.newContext(...)`
+export, since Playwright's *test-scoped* fixtures (the built-in `request`
+included) aren't available inside `beforeAll`/`afterAll`. That worked but
+read as ad hoc — real problem was that `backendApi` (and `apiHelper`,
+which depends on it) had no reason to be test-scoped in the first place:
+`BackendApi`/`AuthApi`/`UsersApi` are fully stateless HTTP wrappers, so
+nothing is lost sharing one instance across every test in a worker. Made
+`backendApi` genuinely `{ scope: 'worker' }` instead, backed by its own
+`APIRequestContext` from the worker-scoped `playwright` fixture
+(`playwright.request.newContext({ baseURL: BASE_URL })`, disposed after
+`use()`) rather than the test-scoped `request` fixture — worker-scoped
+fixtures can depend on other worker-scoped fixtures, just not test-scoped
+ones. `apiHelper` followed `backendApi` into worker scope for the same
+reason. This means `Fixtures` (test-scoped: just `responseContract` now)
+and `WorkerFixtures` (`backendApi`, `apiHelper`) are two separate
+interfaces, both passed to `base.extend<Fixtures, WorkerFixtures>(...)`.
+The payoff: `afterAll` now reads exactly like a normal test body —
+`test.afterAll(async ({ backendApi }) => { ... })` — no special-cased
+context construction left in the spec at all.
+
+This pattern (`describe`-scoped tracking variables + `afterAll` teardown)
+is specific to this one spec file for now — extract it into a shared
+helper once a second spec needs the same shape, not before.
 
 ## E2E admin identity (added 2026-08-18, revised 2026-08-19)
 
@@ -386,18 +449,21 @@ separate identity that's actually an admin.
   that schema-validating the login response isn't this method's job (the
   regular login path already exercises that same response shape), and
   layering it in here would blur `ApiHelper` back toward being a spec.
-  Caches the resolved token in a module-level variable (not an instance
-  field — a fresh `ApiHelper` is constructed per test via the `apiHelper`
-  fixture, but the module itself loads once per Playwright worker
-  process) — caps admin logins at one per worker rather than one per
-  test, keeping clear of the `perAccount` rate limit (5 req/min per
-  `telegramUserId`, root `CLAUDE.md`) as more admin-scoped tests get
-  added. A worker-scoped Playwright fixture would give the same effect
-  with more moving parts (its own `APIRequestContext`, since worker-scoped
-  fixtures can't depend on the test-scoped `request`) — not worth it for
-  what a module-level `let` already does.
+  Caches the resolved token in a private instance field. This was
+  originally a module-level variable (reasoning: a fresh `ApiHelper` used
+  to be constructed per test, but the module itself only loads once per
+  worker) — revised 2026-08-28 once `apiHelper` became a worker-scoped
+  fixture for an unrelated reason (see "Test data & cleanup" →
+  `afterAll`), which means there's now genuinely only one `ApiHelper`
+  instance per worker, and an instance field does the same job as the
+  module-level `let` more directly. Still caps admin logins at one per
+  worker rather than one per test, keeping clear of the `perAccount` rate
+  limit (5 req/min per `telegramUserId`, root `CLAUDE.md`) as more
+  admin-scoped tests get added.
 - **`api/users/UsersApi.ts`** — wraps `GET /users`
-  (`list(accessToken, params?: ListUsersParams)`, bearer auth via header).
+  (`list(accessToken, params?: ListUsersParams)`, bearer auth via header)
+  and `DELETE /users/:id` (`delete(accessToken, userId)`, added 2026-08-27
+  for cleanup — see "Test data & cleanup" above).
   `ListUsersParams` (`api/users/interfaces/`) mirrors the live query params
   (`telegramUsername`, `limit`, `offset`) — named to match the server's
   actual `ListUsersQueryDto` field, not renamed on the client side.
@@ -414,3 +480,55 @@ separate identity that's actually an admin.
 - Not treated as a generic "admin API client for testing admin features"
   — scoped to what this one persistence check needs. Extend it if/when a
   real admin-focused e2e test is written.
+
+## CI: running against a live deploy (added 2026-08-28)
+
+`.github/workflows/e2e-tests.yml` runs this suite automatically after a
+successful deploy — `workflow_run`, watching the root project's `Deploy`
+workflow (`.github/workflows/deploy.yml`, root `CLAUDE.md` → "Deploy
+trigger stays manual"), gated on `github.event.workflow_run.conclusion
+== 'success'`. Deliberately a separate workflow file from `Deploy`
+itself, not a step tacked onto it — different concerns (deploying vs.
+verifying) and different failure semantics (an e2e failure shouldn't
+read as a failed deploy in the Actions UI). No `workflow_dispatch` on
+this one — it only makes sense to run after a real deploy, so there's no
+manual "run it standalone" case worth wiring up separately.
+
+Steps: `actions/checkout@v4`, `actions/setup-node@v4` (Node 22, npm cache
+keyed off `tests/e2e/package-lock.json` specifically — a different lockfile
+than the root project's), `npm ci` and `npm test` both run with
+`working-directory: tests/e2e` (this is its own npm project, not something
+`npm ci` at the repo root would touch).
+
+**Secrets** (GitHub repo Settings → Secrets and variables → Actions):
+`TELEGRAM_BOT_TOKEN`, `ADMIN_TELEGRAM_USER_ID` — same values as
+`tests/e2e/.env` locally, injected as real process env vars via the step's
+`env:` block. No secret named `BASE_URL` — the `constants/index.ts`
+default (`https://befirstapp.com`) is already correct for where this
+actually needs to point, so there's nothing to override.
+
+**Testomat.io reporting (added 2026-08-28).** `@testomatio/reporter`
+(`^2.14.0`), configured in `playwright.config.ts`: `reporter` is `'list'`
+as before when `TESTOMATIO` isn't set (plain local runs), or `[['list'],
+['@testomatio/reporter/playwright', { apiKey: process.env.TESTOMATIO }]]`
+when it is — so the exact same `npm test` command works locally
+(no reporting, nothing to configure) and in CI (reports automatically,
+since the `TESTOMATIO` secret is only present there). The `list` reporter
+stays alongside it deliberately, not replaced — still want readable
+console output for a run watched live, Testomat.io is an addition, not a
+swap. Secret name matches the env var the library itself reads
+(`TESTOMATIO`), so no remapping needed in the workflow.
+
+**Known, accepted risk:** `@testomatio/reporter` unconditionally depends
+on `@cucumber/cucumber` (a hard dependency, not optional/peer) even though
+only the Playwright adapter (`@testomatio/reporter/playwright`) is ever
+used — `npm audit` flags real vulnerabilities inside that unused Cucumber
+dependency chain (`tmp` ≤0.2.5, high; `uuid` <11.1.1, moderate). Accepted
+2026-08-28: the vulnerable code path is never reached by anything this
+project's code calls (no Cucumber usage anywhere), and the only "fix" npm
+offers is downgrading to a ~2-years-old pre-1.0 release, not a real
+option. Revisit if `@testomatio/reporter` ever splits Cucumber support
+into an optional dependency, or if a lighter integration (Testomat.io's
+REST API directly, fed by Playwright's own `json` reporter — considered
+and rejected here in favor of the officially maintained package) becomes
+worth revisiting.
