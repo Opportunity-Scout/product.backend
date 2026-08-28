@@ -21,6 +21,35 @@ The full product/architecture reasoning — domain model, bounded contexts, what
 explicitly out of scope and why — lives in [`CLAUDE.md`](./CLAUDE.md). This file is
 just "how do I run this thing."
 
+## Engineering highlights
+
+A quick map of what this repo actually demonstrates, for anyone skimming it
+as a portfolio project rather than reading it end to end:
+
+- **Domain-driven, layered architecture** — Domain → Application →
+  Infrastructure → Presentation, with the domain model knowing nothing about
+  NestJS, Prisma, or Postgres (see `CLAUDE.md` → "Architectural priority").
+- **Real auth, not a stub** — Telegram-native identity (Login Widget HMAC
+  verification), JWT issuance, per-resource ownership checks that return
+  `404` (never `403`) on a mismatch so nothing leaks via enumeration, plus a
+  role-based admin override for support/moderation.
+- **Production hardening, not just "it runs"** — rate limiting (two
+  independent throttlers, per-IP and per-account), `helmet`, an explicit
+  CORS policy, and a documented trust-proxy bug caught and fixed in review
+  before it shipped.
+- **A real, live deployment** — [befirstapp.com/product-backend-api/swagger](https://befirstapp.com/product-backend-api/swagger),
+  containerized, behind Caddy with a real Let's Encrypt certificate,
+  shipped via a one-click GitHub Actions workflow (SSH + `docker compose`
+  + `prisma migrate deploy`).
+- **A full testing pyramid, each tier checked at the cheapest point that
+  still catches what it's meant to** — unit tests pre-commit, integration
+  tests against a real Postgres on every push, and end-to-end tests
+  (Playwright, against the real deployed API, reported to Testomat.io)
+  automatically after every deploy — see "End-to-end testing" below.
+- **Every decision has a paper trail** — [`CLAUDE.md`](./CLAUDE.md)
+  documents not just what was built but why, including the tradeoffs and
+  gaps deliberately left open and when to revisit them.
+
 ## Current state: Walking Skeleton
 
 Search Profiles are persisted in a real local Postgres, through the same
@@ -66,7 +95,9 @@ These endpoints exist so far:
 Every `/search-profiles` endpoint requires a valid `Authorization: Bearer
 <token>` header (obtained from `POST /auth/telegram`) — `userId` is derived
 from the token, never client-supplied. No Telegram bot, no DOU integration
-yet. Everything below runs **locally only**.
+yet. The sections right below are about running this **locally**; see
+"Deployment" further down for the live, real deployment this same API also
+runs as in production.
 
 ## Stack
 
@@ -301,10 +332,16 @@ admin can pass any user's id, not just their own.
 
 ## Deployment
 
-Live at **[https://befirstapp.com](https://befirstapp.com)** — the VPS is
-provisioned, the domain is live, and `postgres` + `app` + `caddy` are all
-running and verified end-to-end on the server (real login round-trip, real
-row written to Postgres, real Let's Encrypt TLS certificate).
+Live at **`https://befirstapp.com`** — there's no landing page at the bare
+domain (`404` is expected there, the API has no root route), so the actual
+entry point to browse is the interactive API docs:
+
+**[https://befirstapp.com/product-backend-api/swagger](https://befirstapp.com/product-backend-api/swagger)**
+
+The VPS is provisioned, the domain is live, and `postgres` + `app` +
+`caddy` are all running and verified end-to-end on the server (real login
+round-trip, real row written to Postgres, real Let's Encrypt TLS
+certificate).
 
 The app itself is containerized (`Dockerfile`, multi-stage: build then a
 lean production image) and `docker-compose.yml` runs three services
@@ -315,9 +352,16 @@ nothing but Caddy's 80/443 is meant to be reachable from outside the VPS.
 Rate limiting, `helmet`, and an explicit (currently closed) CORS policy are
 already wired in — see `CLAUDE.md` → "Deployment readiness" for the
 reasoning behind each. Server/domain choices (provider, region, plan,
-hardening) are documented in `CLAUDE.md` → "VPS provisioning". Deploy
-itself (wiring up CI to actually push a new version) is still manual and
-not yet automated — tracked in `CLAUDE.md` → "Roadmap".
+hardening) are documented in `CLAUDE.md` → "VPS provisioning".
+
+Shipping a new version is a single manual trigger, not automatic on every
+push: [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)
+SSHes into the VPS and runs `git pull && docker compose up -d --build app`
++ `prisma migrate deploy`, fired from a "Run workflow" button in the
+GitHub Actions UI (`workflow_dispatch`) — see `CLAUDE.md` → "Deployment"
+for why this stays manual rather than continuous-on-push. A successful
+deploy automatically kicks off the end-to-end suite against the freshly
+deployed API — see "End-to-end testing" below.
 
 ## Testing, linting, formatting
 
@@ -346,10 +390,62 @@ they run in CI (before and after deploy respectively), see `CLAUDE.md`.
 
 ### CI
 
-[`.github/workflows/integration-tests.yml`](./.github/workflows/integration-tests.yml)
-runs `test:integration` against a real Postgres service container on every
-push, to any branch — see `CLAUDE.md` for why there's no separate
-`pull_request` trigger.
+Three separate GitHub Actions workflows, each checking a different tier at
+the point where it's cheapest to run and still catches what it's meant to
+(see `CLAUDE.md` → "Testing" for the full reasoning):
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| [`integration-tests.yml`](./.github/workflows/integration-tests.yml) | every `push`, any branch | `test:integration` against a real Postgres service container |
+| [`deploy.yml`](./.github/workflows/deploy.yml) | manual (`workflow_dispatch`) | SSHes into the VPS, ships current `main` to production |
+| [`e2e-tests.yml`](./.github/workflows/e2e-tests.yml) | after a successful `deploy.yml` run, or manual | the Playwright suite against the live API — see "End-to-end testing" below |
+
+There's deliberately no separate `pull_request` trigger on
+`integration-tests.yml` — see `CLAUDE.md` for why.
+
+## End-to-end testing (Playwright + Testomat.io)
+
+A separate, deliberately independent npm project at
+[`tests/e2e/`](./tests/e2e) — its own `package.json`, `node_modules`, and
+`tsconfig.json` — running [Playwright](https://playwright.dev/) against the
+**real, live, deployed API**, not a staging environment or an in-process
+app. Full design rationale lives in
+[`tests/e2e/CLAUDE.md`](./tests/e2e/CLAUDE.md).
+
+- **Real auth, no test-only bypass** — a spec signs a real Telegram Login
+  Widget payload with the shared bot token and calls the real `POST
+  /auth/telegram`, exactly like an actual user would.
+- **Contract testing, not just status-code checks** — every response is
+  validated against a JSON Schema pulled live from the deployed
+  OpenAPI/Swagger spec, via a small hand-written, read-only MCP server
+  ([`tests/e2e/mcp-openapi-server`](./tests/e2e/mcp-openapi-server)) used
+  only as an authoring tool, never able to call the production API itself —
+  this catches contract drift (extra/missing/renamed fields) that
+  field-by-field assertions would miss.
+- **Test case management & reporting in [Testomat.io](https://testomat.io/)** —
+  each spec links itself to a Testomat.io test case via a Playwright test
+  tag (`{ tag: '@Txxxxxxxx' }`), auto-resolved by a fixture; every CI run
+  reports pass/fail, duration, and history straight into the project
+  dashboard, not just a GitHub Actions log.
+- **Self-cleaning against production** — every run creates a real `User`
+  row through a real login; `afterAll` deletes it via the same `DELETE
+  /users/:id` real users get, so no run leaves orphan data behind.
+- **Wired into the deploy pipeline** — runs automatically right after every
+  successful deploy (`workflow_run`), and on demand via `workflow_dispatch`
+  — see [`.github/workflows/e2e-tests.yml`](./.github/workflows/e2e-tests.yml).
+
+Run it locally:
+
+```bash
+cd tests/e2e
+npm install
+cp .env.example .env   # fill in TELEGRAM_BOT_TOKEN and ADMIN_TELEGRAM_USER_ID
+npm test
+```
+
+`BASE_URL` defaults to the live production API — there's no staging
+environment (see `CLAUDE.md` → "Roadmap" for why), so a red run here means
+a real bug in production, not a fixture problem.
 
 ## License
 
