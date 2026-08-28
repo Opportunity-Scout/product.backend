@@ -490,9 +490,22 @@ trigger stays manual"), gated on `github.event.workflow_run.conclusion
 == 'success'`. Deliberately a separate workflow file from `Deploy`
 itself, not a step tacked onto it — different concerns (deploying vs.
 verifying) and different failure semantics (an e2e failure shouldn't
-read as a failed deploy in the Actions UI). No `workflow_dispatch` on
-this one — it only makes sense to run after a real deploy, so there's no
-manual "run it standalone" case worth wiring up separately.
+read as a failed deploy in the Actions UI).
+
+**Also has `workflow_dispatch`** (added 2026-08-28, revised same day) —
+a standing, permanent capability to run the suite on demand from the
+Actions UI, not tacked on just to verify the pipeline once. First cut
+had only `workflow_run`, reasoning that a standalone run "only makes
+sense after a real deploy" — revised once it became clear a manual
+"run it right now" button is genuinely useful on its own (checking the
+suite still passes without waiting for the next deploy, debugging a
+flaky run, etc.), independent of whatever triggered it. The job's `if:`
+has to account for both trigger shapes — `github.event.workflow_run`
+only exists on a `workflow_run` event, so it's
+`github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'`,
+not just the success check alone (which would silently skip the job
+entirely on a manual run, since `github.event.workflow_run` would be
+undefined there).
 
 Steps: `actions/checkout@v4`, `actions/setup-node@v4` (Node 22, npm cache
 keyed off `tests/e2e/package-lock.json` specifically — a different lockfile
