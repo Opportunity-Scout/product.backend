@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+import { BASE_URL } from './constants';
 
 export default defineConfig({
   testDir: './specs',
@@ -6,7 +7,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: 'list',
   use: {
-    baseURL: process.env.BASE_URL ?? 'https://befirstapp.com',
+    baseURL: BASE_URL,
     extraHTTPHeaders: { 'Content-Type': 'application/json' },
   },
 });

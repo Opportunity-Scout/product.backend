@@ -1,25 +1,19 @@
 import { AuthApi } from '../api/auth/AuthApi';
-import { httpStatus } from '../constants/httpStatus';
+import { httpStatus } from '../constants';
 
 const ADMIN_USERNAME = 'e2e_admin';
 
-// Module-level, not an instance field — a fresh ApiHelper is constructed per
-// test, but this module is loaded once per Playwright worker process, so the
-// cached token survives across every test that worker runs. Caps admin
-// logins at one per worker instead of one per test, keeping well clear of
-// the perAccount rate limit (5 req/min per telegramUserId, see root
-// CLAUDE.md) as more admin-scoped tests get added.
-let cachedAdminToken: string | undefined;
-
 export class ApiHelper {
+  private cachedAdminToken: string | undefined;
+
   constructor(
     private readonly auth: AuthApi,
     private readonly adminTelegramUserId: string,
   ) {}
 
   async getAdminAccessToken(): Promise<string> {
-    if (cachedAdminToken) {
-      return cachedAdminToken;
+    if (this.cachedAdminToken) {
+      return this.cachedAdminToken;
     }
 
     const response = await this.auth.login({
@@ -33,8 +27,7 @@ export class ApiHelper {
     }
 
     const { token } = (await response.json()) as { token: string };
-
-    cachedAdminToken = token;
+    this.cachedAdminToken = token;
 
     return token;
   }

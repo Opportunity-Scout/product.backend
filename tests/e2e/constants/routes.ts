@@ -4,6 +4,7 @@ const auth = {
 
 const users = {
   list: '/users',
+  deleteById: (id: string) => `/users/${id}`,
 };
 
 export const routes = {

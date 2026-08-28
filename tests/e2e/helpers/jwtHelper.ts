@@ -7,7 +7,7 @@ import { JwtClaims } from './interfaces';
 // only inspect the claims it carries. That matches what an external API
 // consumer actually sees: nobody outside the server verifies the signature.
 class JwtHelper {
-  private decode(token: string): JwtClaims {
+  decode(token: string): JwtClaims {
     const parts = token.split('.');
 
     if (parts.length !== 3) {

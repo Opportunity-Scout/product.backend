@@ -2,33 +2,41 @@ import { test as base, expect } from '@playwright/test';
 import { BackendApi } from '../api/BackendApi';
 import { ApiHelper } from '../helpers/apiHelper';
 import { responseContract } from '../helpers/responseContractHelper';
-import { Fixtures } from './interfaces';
+import { BASE_URL } from '../constants';
+import { Fixtures, WorkerFixtures } from './interfaces';
 
-export const test = base.extend<Fixtures>({
-  backendApi: async ({ request }, use) => {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+export const test = base.extend<Fixtures, WorkerFixtures>({
+  backendApi: [
+    async ({ playwright }, use) => {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
-    if (!botToken) {
-      throw new Error('TELEGRAM_BOT_TOKEN is not set — copy .env.example to .env and fill it in');
-    }
+      if (!botToken) {
+        throw new Error('TELEGRAM_BOT_TOKEN is not set — copy .env.example to .env and fill it in');
+      }
 
-    await use(new BackendApi(request, botToken));
-  },
+      const context = await playwright.request.newContext({ baseURL: BASE_URL });
+
+      await use(new BackendApi(context, botToken));
+      await context.dispose();
+    },
+    { scope: 'worker' },
+  ],
   // eslint-disable-next-line no-empty-pattern
   responseContract: async ({}, use) => {
     await use(responseContract);
   },
-  apiHelper: async ({ backendApi }, use) => {
-    const adminTelegramUserId = process.env.ADMIN_TELEGRAM_USER_ID;
+  apiHelper: [
+    async ({ backendApi }, use) => {
+      const adminTelegramUserId = process.env.ADMIN_TELEGRAM_USER_ID;
 
-    if (!adminTelegramUserId) {
-      throw new Error(
-        'ADMIN_TELEGRAM_USER_ID is not set — see CLAUDE.md "E2E admin identity" for how to provision one',
-      );
-    }
+      if (!adminTelegramUserId) {
+        throw new Error('ADMIN_TELEGRAM_USER_ID is not set — see CLAUDE.md "E2E admin identity" for how to provision one');
+      }
 
-    await use(new ApiHelper(backendApi.auth, adminTelegramUserId));
-  },
+      await use(new ApiHelper(backendApi.auth, adminTelegramUserId));
+    },
+    { scope: 'worker' },
+  ],
 });
 
 export { expect };
