@@ -520,6 +520,63 @@ than the root project's), `npm ci` and `npm test` both run with
 default (`https://befirstapp.com`) is already correct for where this
 actually needs to point, so there's nothing to override.
 
+**Telegram reporting (added 2026-08-29)**, closing the ClickUp task filed
+2026-08-28 ("publish e2e results to a Telegram channel so a red prod run
+gets noticed without checking Actions/Testomat.io by hand"). Two new
+secrets: `TELEGRAM_REPORT_BOT_TOKEN` and `TELEGRAM_REPORT_CHAT_ID` —
+deliberately **not** a reuse of the existing `TELEGRAM_BOT_TOKEN`, which
+turned out to be a placeholder string (see root `.env`'s own comment),
+never registered with Telegram via BotFather — it only ever served as
+local HMAC key material for signing/verifying the Login Widget payload
+(root `CLAUDE.md` → "Planned auth model"), so it can't authenticate any
+real Bot API call. Registered a second, real, dedicated bot
+(`@befirst_ci_reports_bot`) for this instead of "upgrading" the
+placeholder — keeps an auth-flow secret and an unrelated CI-reporting
+concern from becoming entangled. `TELEGRAM_REPORT_CHAT_ID` is the
+target channel's numeric id (`-100...`) — channels only deliver
+`channel_post` updates to a bot that was already an admin *at the time*
+a message was posted, so the id was obtained by adding the bot as
+channel admin, posting a message, then reading it back via
+`getUpdates`. Verified live before trusting it: `getMe` confirmed the
+token matches the admin-added bot, `getWebhookInfo` ruled out a stray
+webhook silently swallowing updates, and real `sendMessage` round-trips
+(success/failure branches, with/without a Testomat.io run id) were
+posted to the actual channel.
+
+Three steps after `npm test`, all `if: always()` so they run whether
+the suite passed or failed:
+
+- **`testomatio_run`** reads `@testomatio/reporter`'s own
+  `${os.tmpdir()}/testomatio.latest.run` file — found by reading the
+  installed package's source (`lib/utils/utils.js` →
+  `storeRunId`/`readLatestRunId`), not documented — to get the
+  just-created run's id as a step output. No Testomat.io API call
+  needed; the reporter already wrote it locally during the run.
+- **`job_url`** resolves the *specific job's* log page
+  (`.../actions/runs/<run_id>/job/<job_id>`), not just the run summary
+  — the `github` context only exposes the job's YAML key (`e2e`) as a
+  string, not the numeric job id the URL needs, so this calls
+  `GET /repos/{repo}/actions/runs/{run_id}/jobs` with `github.token` and
+  matches by job name via `jq`. Needs `actions: read` added to the
+  workflow's `permissions:` block (`contents: read` alone doesn't grant
+  it — an explicit `permissions:` block sets every unlisted scope to
+  `none`, not a default). **Falls back to the run-level URL if the job
+  id can't be resolved** (empty or `null` from `jq`, e.g. the API call
+  itself fails) — caught in review: without this, an empty
+  `url` would produce a `sendMessage` call with an empty button `url`,
+  which Telegram's Bot API rejects outright (`BUTTON_URL_INVALID`),
+  silently dropping the *entire* notification — including on the exact
+  runs (failures) where getting notified matters most. The fallback
+  guarantees `steps.job_url.outputs.url` is always a valid, non-empty
+  link.
+- The final step posts one message via `curl` to the Bot API's
+  `sendMessage`, with two inline-keyboard buttons ("Build Logs",
+  "Testomat.io" — real Telegram buttons via `reply_markup`, not plain
+  in-text links, built with `jq` for correct JSON escaping) — the
+  Testomat.io button only appears if `testomatio_run` resolved a run
+  id. `curl --data-urlencode` (not manual string-building) handles
+  encoding correctly.
+
 **Testomat.io reporting (added 2026-08-28).** `@testomatio/reporter`
 (`^2.14.0`), configured in `playwright.config.ts`: `reporter` is `'list'`
 as before when `TESTOMATIO` isn't set (plain local runs), or `[['list'],
