@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   e2e:
@@ -26,9 +27,58 @@ jobs:
       - working-directory: tests/e2e
         run: npm ci
 
-      - working-directory: tests/e2e
+      - id: e2e
+        working-directory: tests/e2e
         run: npm test
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ADMIN_TELEGRAM_USER_ID: ${{ secrets.ADMIN_TELEGRAM_USER_ID }}
           TESTOMATIO: ${{ secrets.TESTOMATIO }}
+
+      - id: testomatio_run
+        if: always()
+        run: |
+          RUN_ID_FILE="$(node -e "console.log(require('os').tmpdir())")/testomatio.latest.run"
+          if [ -f "$RUN_ID_FILE" ]; then
+            echo "run_id=$(cat "$RUN_ID_FILE")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - id: job_url
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          JOB_ID=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            | jq -r --arg name "${{ github.job }}" '.jobs[] | select(.name == $name) | .id')
+
+          if [ -n "$JOB_ID" ] && [ "$JOB_ID" != "null" ]; then
+            echo "url=${RUN_URL}/job/${JOB_ID}" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=${RUN_URL}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: always()
+        env:
+          TELEGRAM_REPORT_BOT_TOKEN: ${{ secrets.TELEGRAM_REPORT_BOT_TOKEN }}
+          TELEGRAM_REPORT_CHAT_ID: ${{ secrets.TELEGRAM_REPORT_CHAT_ID }}
+          STATUS: ${{ steps.e2e.outcome }}
+          RUN_ID: ${{ steps.testomatio_run.outputs.run_id }}
+          GH_JOB_URL: ${{ steps.job_url.outputs.url }}
+        run: |
+          if [ "$STATUS" = "success" ]; then EMOJI="✅"; else EMOJI="❌"; fi
+
+          TEXT="${EMOJI} E2E tests: ${STATUS}"
+
+          BUTTONS=$(jq -n --arg gh "$GH_JOB_URL" '[[{text: "Build Logs", url: $gh}]]')
+          if [ -n "$RUN_ID" ]; then
+            TESTOMATIO_URL="https://app.testomat.io/projects/befirst/runs/${RUN_ID}"
+            BUTTONS=$(jq -n --arg gh "$GH_JOB_URL" --arg t "$TESTOMATIO_URL" \
+              '[[{text: "Build Logs", url: $gh}], [{text: "Testomat.io", url: $t}]]')
+          fi
+
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_REPORT_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_REPORT_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" \
+            --data-urlencode "reply_markup={\"inline_keyboard\":${BUTTONS}}"
