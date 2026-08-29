@@ -5,4 +5,5 @@ export interface User {
   role: string;
   searchProfileLimit: number;
   createdAt: string;
+  updatedAt: string;
 }

@@ -7,7 +7,7 @@ export const ListUsersResponseSchema = {
       type: 'array',
       items: {
         type: 'object',
-        required: ['id', 'telegramUserId', 'telegramUsername', 'role', 'searchProfileLimit', 'createdAt'],
+        required: ['id', 'telegramUserId', 'telegramUsername', 'role', 'searchProfileLimit', 'createdAt', 'updatedAt'],
         additionalProperties: false,
         properties: {
           id: { type: 'string', format: 'uuid' },
@@ -16,6 +16,7 @@ export const ListUsersResponseSchema = {
           role: { type: 'string', enum: ['user', 'admin'] },
           searchProfileLimit: { type: 'number' },
           createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
         },
       },
     },
