@@ -19,4 +19,7 @@ export class UserResponseDto {
 
   @ApiProperty()
   createdAt!: Date;
+
+  @ApiProperty()
+  updatedAt!: Date;
 }

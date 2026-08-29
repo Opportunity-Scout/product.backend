@@ -11,13 +11,16 @@ export class User {
   private constructor(private readonly props: UserProps) {}
 
   static create(input: CreateUserProps): User {
+    const now = new Date();
+
     return new User({
       id: randomUUID(),
       telegramUserId: input.telegramUserId,
       telegramUsername: input.telegramUsername ?? null,
       role: 'user',
       searchProfileLimit: DEFAULT_SEARCH_PROFILE_LIMIT,
-      createdAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     });
   }
 
@@ -26,7 +29,13 @@ export class User {
   }
 
   updateTelegramUsername(telegramUsername: string | null): User {
-    return new User({ ...this.props, telegramUsername });
+    // Called on every login (LoginWithTelegramUseCase), not just on a real change — a no-op
+    // guard keeps updatedAt meaning "last actual change", not "last login".
+    if (telegramUsername === this.props.telegramUsername) {
+      return this;
+    }
+
+    return new User({ ...this.props, telegramUsername, updatedAt: new Date() });
   }
 
   setSearchProfileLimit(limit: number): Result<User, InvalidSearchProfileLimitError> {
@@ -34,7 +43,7 @@ export class User {
       return Result.fail(new InvalidSearchProfileLimitError(limit));
     }
 
-    return Result.ok(new User({ ...this.props, searchProfileLimit: limit }));
+    return Result.ok(new User({ ...this.props, searchProfileLimit: limit, updatedAt: new Date() }));
   }
 
   get id(): string {
@@ -59,5 +68,9 @@ export class User {
 
   get createdAt(): Date {
     return this.props.createdAt;
+  }
+
+  get updatedAt(): Date {
+    return this.props.updatedAt;
   }
 }

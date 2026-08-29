@@ -8,5 +8,6 @@ export function toUserResponse(user: User) {
     role: user.role,
     searchProfileLimit: user.searchProfileLimit,
     createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
   };
 }

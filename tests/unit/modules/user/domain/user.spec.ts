@@ -15,14 +15,16 @@ describe('User', () => {
   });
 
   it('reconstitutes a user from trusted, already-valid props', () => {
-    const now = new Date('2026-01-01T00:00:00.000Z');
+    const createdAt = new Date('2026-01-01T00:00:00.000Z');
+    const updatedAt = new Date('2026-01-02T00:00:00.000Z');
     const props = {
       id: 'existing-id',
       telegramUserId: '12345',
       telegramUsername: 'oleg',
       role: 'admin' as const,
       searchProfileLimit: 5,
-      createdAt: now,
+      createdAt,
+      updatedAt,
     };
 
     const user = User.reconstitute(props);
@@ -32,7 +34,8 @@ describe('User', () => {
     expect(user.telegramUsername).toBe('oleg');
     expect(user.role).toBe('admin');
     expect(user.searchProfileLimit).toBe(5);
-    expect(user.createdAt).toBe(now);
+    expect(user.createdAt).toBe(createdAt);
+    expect(user.updatedAt).toBe(updatedAt);
   });
 
   it('defaults role to user and search profile limit to 1 on create', () => {
@@ -51,11 +54,27 @@ describe('User', () => {
     expect(updated.telegramUserId).toBe(user.telegramUserId);
   });
 
+  it('bumps updatedAt when the telegram username actually changes', () => {
+    const user = User.create({ telegramUserId: '12345', telegramUsername: 'oleg' });
+    const updated = user.updateTelegramUsername('new-username');
+
+    expect(updated).not.toBe(user);
+    expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(user.updatedAt.getTime());
+  });
+
   it('clears the telegram username when updated to null', () => {
     const user = User.create({ telegramUserId: '12345', telegramUsername: 'oleg' });
     const updated = user.updateTelegramUsername(null);
 
     expect(updated.telegramUsername).toBeNull();
+  });
+
+  it('returns the same instance and leaves updatedAt untouched when the telegram username is unchanged', () => {
+    const user = User.create({ telegramUserId: '12345', telegramUsername: 'oleg' });
+    const updated = user.updateTelegramUsername('oleg');
+
+    expect(updated).toBe(user);
+    expect(updated.updatedAt).toBe(user.updatedAt);
   });
 
   it('sets a new search profile limit, keeping everything else the same', () => {

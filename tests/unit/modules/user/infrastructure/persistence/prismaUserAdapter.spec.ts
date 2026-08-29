@@ -17,10 +17,12 @@ describe('PrismaUserAdapter', () => {
     expect(call.where).toEqual({ id: user.id });
     expect(call.create.id).toBe(user.id);
     expect(call.create.createdAt).toBe(user.createdAt);
+    expect(call.create.updatedAt).toBe(user.updatedAt);
     expect(call.create.role).toBe('user');
     expect(call.create.searchProfileLimit).toBe(1);
     expect(call.update.id).toBeUndefined();
     expect(call.update.createdAt).toBeUndefined();
+    expect(call.update.updatedAt).toBe(user.updatedAt);
     expect(call.update.role).toBe('user');
     expect(call.update.searchProfileLimit).toBe(1);
   });
@@ -45,6 +47,7 @@ describe('PrismaUserAdapter', () => {
       role: 'admin',
       searchProfileLimit: 3,
       createdAt: now,
+      updatedAt: now,
     });
 
     const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
@@ -77,6 +80,7 @@ describe('PrismaUserAdapter', () => {
       role: 'user',
       searchProfileLimit: 1,
       createdAt: now,
+      updatedAt: now,
     });
 
     const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
@@ -100,6 +104,7 @@ describe('PrismaUserAdapter', () => {
         role: 'user',
         searchProfileLimit: 1,
         createdAt: now,
+        updatedAt: now,
       },
     ]);
     fakePrisma.user.count.mockResolvedValue(1);

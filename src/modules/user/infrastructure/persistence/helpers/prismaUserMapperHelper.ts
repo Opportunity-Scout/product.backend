@@ -10,6 +10,7 @@ class PrismaUserMapper {
       role: row.role,
       searchProfileLimit: row.searchProfileLimit,
       createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     });
   }
 }

@@ -7,4 +7,5 @@ export interface UserProps {
   role: UserRole;
   searchProfileLimit: number;
   createdAt: Date;
+  updatedAt: Date;
 }
