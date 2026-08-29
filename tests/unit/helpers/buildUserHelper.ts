@@ -18,5 +18,6 @@ export function buildUser(overrides: BuildUserOverrides = {}): User {
     role: overrides.role ?? created.role,
     searchProfileLimit: overrides.searchProfileLimit ?? created.searchProfileLimit,
     createdAt: created.createdAt,
+    updatedAt: created.updatedAt,
   });
 }

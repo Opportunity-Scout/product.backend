@@ -24,6 +24,7 @@ model User {
   role               UserRole @default(user)
   searchProfileLimit Int      @default(1) @map("search_profile_limit")
   createdAt          DateTime @map("created_at")
+  updatedAt          DateTime @map("updated_at")
 
   @@map("users")
 }
