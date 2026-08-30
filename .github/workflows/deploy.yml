@@ -17,8 +17,14 @@ jobs:
           port: 22022
           username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: BRANCH
           script: |
+            set -euo pipefail
             cd ~/product.backend
-            git pull
+            git fetch origin
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+            echo "Deployed branch: $(git branch --show-current) at commit $(git rev-parse --short HEAD)"
             docker compose up -d --build app
             docker compose exec -T app npx prisma migrate deploy
+        env:
+          BRANCH: ${{ github.ref_name }}

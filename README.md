@@ -356,12 +356,13 @@ hardening) are documented in `CLAUDE.md` → "VPS provisioning".
 
 Shipping a new version is a single manual trigger, not automatic on every
 push: [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml)
-SSHes into the VPS and runs `git pull && docker compose up -d --build app`
-+ `prisma migrate deploy`, fired from a "Run workflow" button in the
-GitHub Actions UI (`workflow_dispatch`) — see `CLAUDE.md` → "Deployment"
-for why this stays manual rather than continuous-on-push. A successful
-deploy automatically kicks off the end-to-end suite against the freshly
-deployed API — see "End-to-end testing" below.
+SSHes into the VPS, checks out whichever branch was picked when running
+the workflow (`main` by default, but any branch works — see
+`CLAUDE.md` → "Deployment" for why), then runs
+`docker compose up -d --build app` + `prisma migrate deploy`, fired from
+a "Run workflow" button in the GitHub Actions UI (`workflow_dispatch`).
+A successful deploy automatically kicks off the end-to-end suite against
+the freshly deployed API — see "End-to-end testing" below.
 
 ## Testing, linting, formatting
 
@@ -397,7 +398,7 @@ the point where it's cheapest to run and still catches what it's meant to
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | [`integration-tests.yml`](./.github/workflows/integration-tests.yml) | every `push`, any branch | `test:integration` against a real Postgres service container |
-| [`deploy.yml`](./.github/workflows/deploy.yml) | manual (`workflow_dispatch`) | SSHes into the VPS, ships current `main` to production |
+| [`deploy.yml`](./.github/workflows/deploy.yml) | manual (`workflow_dispatch`) | SSHes into the VPS, ships whichever branch was selected to production |
 | [`e2e-tests.yml`](./.github/workflows/e2e-tests.yml) | after a successful `deploy.yml` run, or manual | the Playwright suite against the live API — see "End-to-end testing" below |
 
 There's deliberately no separate `pull_request` trigger on

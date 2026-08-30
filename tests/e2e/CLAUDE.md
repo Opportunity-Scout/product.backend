@@ -507,6 +507,29 @@ not just the success check alone (which would silently skip the job
 entirely on a manual run, since `github.event.workflow_run` would be
 undefined there).
 
+**Which branch's test code runs is deliberately different per trigger**
+(decided 2026-08-30, while making `deploy.yml` branch-aware — root
+`CLAUDE.md` → "Deploys the branch you pick, not always `main`"). No
+explicit `ref:` on the `actions/checkout` step, and the two triggers
+resolve that default differently: `workflow_run` has no built-in
+awareness of which branch the triggering `Deploy` run actually used —
+GitHub defaults an unset `ref:` to the repo's default branch for this
+event type, not `github.event.workflow_run.head_branch` — so the
+automatic post-deploy run always checks out `main`'s e2e suite,
+regardless of which branch just got deployed. `workflow_dispatch`, by
+contrast, defaults `ref:` to whichever branch was picked in the "Run
+workflow" UI. Considered making both branch-aware (an explicit
+`ref: ${{ github.event.workflow_run.head_branch }}` for the
+`workflow_run` case) and deliberately didn't: e2e specs here are
+black-box contract tests against the live API, not app-code-coupled
+unit tests (see "What this is" above) — the automatic run's job is to
+be a stable, independent regression check on whatever's now live,
+un-influenced by whatever the just-deployed branch's own tests happen
+to say. Validating a branch's *own*, in-flight test changes together
+with its app changes is what the manual `workflow_dispatch` trigger is
+for — pick that branch explicitly when that's actually what's needed,
+rather than making the always-on check track it automatically.
+
 Steps: `actions/checkout@v7`, `actions/setup-node@v7` (Node 22, npm cache
 keyed off `tests/e2e/package-lock.json` specifically — a different lockfile
 than the root project's), `npm ci` and `npm test` both run with
