@@ -848,7 +848,8 @@ TLS warning — the full stack (`postgres` + `app` + `caddy`) is live.
 **Deploy trigger stays manual, not continuous-on-push** (decided
 2026-08-08, automated 2026-08-23) — `.github/workflows/deploy.yml` SSHes
 into the VPS (`appleboy/ssh-action`, pinned to `v1.2.5`, not a floating
-tag) and runs the same steps previously done by hand: `git pull`,
+tag) and runs the same steps previously done by hand: `git fetch origin`
++ `git checkout -B "$BRANCH" "origin/$BRANCH"`,
 `docker compose up -d --build app` (scoped to `app` only — `postgres`/
 `caddy` have no `build:` of their own), then `docker compose exec -T app
 npx prisma migrate deploy` — added as an unconditional step even though
@@ -864,6 +865,58 @@ keypair (not anyone's personal key) added to `~deploy/.ssh/authorized_keys`
 on the VPS. Host/port/user (`befirstapp.com`/`22022`/`deploy`) aren't
 secret — already public in this file — so they're inlined directly in
 the workflow, not duplicated into secrets that would just need to match.
+
+**Deploys the branch you pick, not always `main`** (added 2026-08-30) —
+originally a bare `git pull`, which pulls whatever the VPS's
+already-checked-out local branch tracks regardless of which branch was
+selected in the `workflow_dispatch` UI (that selection only controls
+which *version of the workflow file* the runner executes, it's never
+threaded into the SSH script on its own). Found the hard way: deploying
+an unmerged branch to validate a migration silently deployed `main`
+instead, and e2e passed because nothing had actually changed. Fixed by
+passing `github.ref_name` into the SSH session (`envs: BRANCH` +
+`env: BRANCH: ${{ github.ref_name }}` — `appleboy/ssh-action` doesn't
+inherit runner env vars into the remote script by default, they have to
+be explicitly named) and switching the git step to
+`git checkout -B "$BRANCH" "origin/$BRANCH"` (after a `git fetch
+origin`), not a `pull` — one atomic command that creates the local
+branch if it doesn't exist yet and force-resets it to exactly
+`origin/$BRANCH` either way, rather than a plain `checkout` followed by
+a separate `reset --hard`, which left a real gap: if `checkout` failed
+or landed somewhere unexpected (a dirty working tree blocking it, an
+exotic ref-ambiguity case), the *following* `reset --hard` would still
+run and force-move whatever branch `HEAD` actually landed on — silently
+corrupting the wrong local branch (e.g. `main` itself) rather than
+failing loudly. Caught the same "silently deployed the wrong thing but
+Actions still shows green" class of bug this whole fix exists to close,
+just one layer deeper: the script had no `set -e`, so a failing `git`
+command wouldn't stop it — execution would fall through to `docker
+compose up -d --build app` anyway, redeploying whatever was already on
+disk, and the step's exit code would just be `prisma migrate deploy`'s
+(likely `0`), not the earlier failure's. Added `set -euo pipefail` as
+the script's first line so any failing command aborts the whole deploy
+immediately and fails the Actions job for real. A one-line `echo` of
+the branch/commit that actually got deployed is included specifically
+so a run's own log always states what's now live, without needing a
+separate step.
+
+`integration-tests.yml` needed no change (already branch-agnostic,
+`on: push:` with no filter). `e2e-tests.yml` also needed no code
+change, but for a reasoned decision, not an oversight — see
+`tests/e2e/CLAUDE.md` → "CI: running against a live deploy": its
+automatic post-`Deploy` run deliberately keeps testing with `main`'s
+e2e suite regardless of which branch just got deployed (a stable,
+independent regression check), while its manual `workflow_dispatch`
+trigger already correctly runs whichever branch's own test code is
+picked.
+
+**Known, deliberate gap:** no auto-revert to `main`. Deploying a branch
+leaves the VPS on that branch indefinitely until someone explicitly
+deploys `main` again — same "manual trigger, human stays in the loop"
+reasoning as the trigger itself; an automatic revert-after-testing
+mechanism would be real added complexity (when does "testing" end?) for
+a solo-dev repo where forgetting is a self-inflicted, easily-checked
+risk (`echo` line above, or just re-running `Deploy` on `main`).
 
 **Known, deliberate gap (2026-08-16): redeploy causes a brief downtime,
 not zero-downtime.** `docker compose up -d --build` builds the new `app`
