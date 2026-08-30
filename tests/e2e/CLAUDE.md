@@ -507,11 +507,14 @@ not just the success check alone (which would silently skip the job
 entirely on a manual run, since `github.event.workflow_run` would be
 undefined there).
 
-Steps: `actions/checkout@v4`, `actions/setup-node@v4` (Node 22, npm cache
+Steps: `actions/checkout@v7`, `actions/setup-node@v7` (Node 22, npm cache
 keyed off `tests/e2e/package-lock.json` specifically — a different lockfile
 than the root project's), `npm ci` and `npm test` both run with
 `working-directory: tests/e2e` (this is its own npm project, not something
-`npm ci` at the repo root would touch).
+`npm ci` at the repo root would touch). Both actions were bumped from `v4`
+2026-08-29 — `v4` bundled a Node 20 runtime that GitHub Actions was
+deprecating, forcing runs onto Node 24 with a warning; `v7` declares
+`using: node24` natively, so the warning is gone rather than tolerated.
 
 **Secrets** (GitHub repo Settings → Secrets and variables → Actions):
 `TELEGRAM_BOT_TOKEN`, `ADMIN_TELEGRAM_USER_ID` — same values as
