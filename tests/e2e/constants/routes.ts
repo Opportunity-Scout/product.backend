@@ -3,8 +3,9 @@ const auth = {
 };
 
 const users = {
-  list: '/users',
+  getUsers: '/users',
   deleteById: (id: string) => `/users/${id}`,
+  setSearchProfileLimit: (id: string) => `/users/${id}/search-profile-limit`,
 };
 
 export const routes = {
