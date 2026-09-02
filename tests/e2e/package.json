@@ -15,10 +15,11 @@
     "@playwright/test": "^1.62.1",
     "@testomatio/reporter": "^2.14.0",
     "@types/node": "^22.20.1",
+    "@types/uuid-validate": "^0.0.3",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "json-schema-to-ts": "^3.1.1",
     "typescript": "^7.0.2",
-    "uuid": "^14.0.1"
+    "uuid-validate": "^0.0.3"
   }
 }

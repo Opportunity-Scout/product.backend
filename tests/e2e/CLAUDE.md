@@ -58,11 +58,15 @@ tests/e2e/
       AuthApi.ts          wraps POST /auth/telegram — one method, login(fields)
       interfaces/           TelegramLoginFields, TelegramLoginPayload
     users/
-      UsersApi.ts          wraps GET /users (admin-only) and DELETE /users/:id
+      UsersApi.ts          wraps GET /users (getUsers(), admin-only) and DELETE /users/:id
       interfaces/           ListUsersParams, User, GetUsersListResponse
+      types/                 UserRole
   helpers/             Test-oriented utilities — stateless singletons by
                         default (see "Helpers" below for the one exception)
-    commonHelper.ts       e.g. Telegram Login Widget HMAC signing
+    commonHelper.ts       General-purpose grab bag, not Telegram-specific despite
+                           the first occupant — e.g. Telegram Login Widget HMAC
+                           signing, UUID v4 validation, random-int generation
+                           (see "commonHelper.ts" below)
     responseContractHelper.ts    AJV-based ResponseContract.validate(response, status, schema)
     jwtHelper.ts          JwtHelper.expectTokenIsValid(token) — decode-only JWT claim checks
     apiHelper.ts          ApiHelper.getAdminAccessToken() — the one stateful
@@ -73,26 +77,75 @@ tests/e2e/
     interfaces/            Fixtures (test-scoped), WorkerFixtures (worker-scoped)
   constants/           No magic strings/numbers
     index.ts               barrel — re-exports routes.ts/httpStatus.ts and hosts
-                            one-off values directly (e.g. BASE_URL) rather than
-                            giving every single constant its own file. A second,
+                            one-off values directly (e.g. BASE_URL,
+                            DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET,
+                            DEFAULT_SEARCH_PROFILE_LIMIT)
+                            rather than giving every single constant its
+                            own file. A second,
                             deliberate exception to "no barrels" (the first is
                             interfaces/ folders) — see below.
     routes.ts             API paths, grouped by domain — mirrors api/'s structure
     httpStatus.ts          HTTP status codes actually asserted on (grows as tests need more, not pre-filled)
-  testData/            Input payloads for specs, one subfolder per
-                        endpoint-group, mirrors api/ (still taking shape —
-                        first occupant is testData/auth/login.ts)
-  specs/               Playwright's testDir — one subfolder per endpoint-group, mirrors api/
+  testData/            Input payloads for specs, mirrors specs/'s own
+                        structure exactly (including the per-endpoint
+                        subfolder nesting, see specs/ below) — one file
+                        per spec, same name and same path shape
+                        (testData/auth/login/returnsBearerToken.ts,
+                        testData/users/getUsers/filtersByUsername.ts) —
+                        see "Synthetic data naming" below for the `e2e_`
+                        username convention both follow.
+  specs/               Playwright's testDir — one subfolder per
+                        endpoint-group, mirrors api/; one test per file
+                        (see "Spec naming: atomic files" below). **Always
+                        a further per-endpoint subfolder**, one per
+                        `api/` method (`login/`, `getUsers/`) — revised
+                        2026-08-31 twice in one day: first to add the
+                        subfolder once `getUsers` alone crossed 10 files
+                        in a flat `specs/users/`, then again to apply it
+                        to `auth/login/` too even with its single test,
+                        for consistency across domains rather than a
+                        per-domain judgment call each time (see "Spec
+                        naming: atomic files" below for both). File names
+                        inside a subfolder drop the now-redundant
+                        endpoint prefix the subfolder already carries.
     auth/
-      login.spec.ts
+      login/
+        returnsBearerToken.spec.ts
+    users/
+      getUsers/
+        filtersByUsername.spec.ts
+        returnsAllUsers.spec.ts
+        filtersByNonexistentUsername.spec.ts
+        rejectsNonAdmin.spec.ts
+        rejectsInvalidLimit.spec.ts
+      setSearchProfileLimit/
+        setsRandomLimit.spec.ts
+        setsLimitToZero.spec.ts
+        rejectsNonAdmin.spec.ts
+        rejectsInvalidLimit.spec.ts
+        rejectsNonexistentUser.spec.ts
+      deleteUser/
+        deletesSelf.spec.ts
+        adminDeletesUser.spec.ts
+        rejectsNonOwner.spec.ts
+        rejectsNonexistentUser.spec.ts
   schemas/             JSON Schemas per endpoint response, for AJV-based
                         response validation — pulled from the live Swagger/OpenAPI
                         spec via mcp-openapi-server (below), not hand-duplicated
-                        from memory. One subfolder per endpoint-group, mirrors api/.
+                        from memory. One subfolder per endpoint-group, mirrors
+                        api/ — and, like every interfaces/ folder, gets its
+                        own index.ts barrel (added 2026-08-31, once a single
+                        spec started needing three schemas across two
+                        domains at once): consumers import
+                        `from '../../../schemas/users'`, not the individual
+                        file.
     auth/
       LoginResponseSchema.ts
+      index.ts
     users/
       ListUsersResponseSchema.ts
+      SetSearchProfileLimitResponseSchema.ts
+      index.ts
   mcp-openapi-server/  A separate, third npm project (own package.json, own
                         node_modules) — a minimal read-only MCP server used only
                         as an authoring tool for schemas/, not part of the
@@ -163,7 +216,10 @@ decided independently for this sub-project rather than assumed. Unlike the
 root project (which deliberately avoids barrel files outside one narrow
 exception), every `interfaces/` folder here gets an `index.ts` barrel —
 decided for this project specifically, for import convenience, not
-inherited from root.
+inherited from root. `schemas/<domain>/` folders followed the same
+pattern once a real need showed up (see "Response schema validation"
+below) — not `interfaces/` folders themselves, but the same "folder of
+related, individually-authored files, worth one barrel" shape.
 
 **Constants** (`constants/`) hold anything that would otherwise be a magic
 string or number repeated across specs/API classes: route paths
@@ -172,9 +228,11 @@ status codes (`httpStatus.ts`) actually asserted on somewhere — not a
 speculative full list of every possible status up front. **Also has an
 `index.ts` barrel** (added 2026-08-28) — a second, deliberate exception to
 "no barrels outside `interfaces/`": re-exports `routes.ts`/`httpStatus.ts`,
-and hosts genuinely one-off values (`BASE_URL`) directly in the barrel
-itself rather than giving a single primitive its own file. Every consumer
-now imports from `../../constants`, not individual files.
+and hosts genuinely one-off values (`BASE_URL`, and — added 2026-08-30 —
+`DEFAULT_PAGE_LIMIT`, `DEFAULT_PAGE_OFFSET`, `DEFAULT_SEARCH_PROFILE_LIMIT`,
+see "GET /users coverage" below) directly in the barrel itself rather than
+giving a single primitive its own file. Every consumer now imports from
+`../../constants`, not individual files.
 
 **Response schema validation** (`schemas/`, implemented 2026-08-17): AJV
 validates each response body against a JSON Schema, asserted through the
@@ -233,6 +291,16 @@ undocumented extra field. Doing it once in the tool, not per schema file,
 means every future schema pulled this way is strict by default without
 needing to remember to hand-add it.
 
+**Each `schemas/<domain>/` folder gets an `index.ts` barrel** (added
+2026-08-31, prompted by `specs/users/setSearchProfileLimit/setsRandomLimit.spec.ts`
+needing `LoginResponseSchema` + `ListUsersResponseSchema` +
+`SetSearchProfileLimitResponseSchema` in one file — three separate
+full-path imports, two of them from the same `schemas/users/` folder,
+was the trigger to stop doing this by hand) — `export * from
+'./XResponseSchema'` per file, same shape as the `api/*/interfaces/`
+barrels. Consumers import `from '../../../schemas/users'`, not
+`'../../../schemas/users/ListUsersResponseSchema'`.
+
 **`validate` also carries a custom, descriptive assertion message**
 (decided 2026-08-17) — not the default Playwright/AJV failure output: on a
 schema mismatch it lists each AJV error's `instancePath` + message, not
@@ -256,22 +324,58 @@ Node's native `Buffer.from(part, 'base64url')`, so no dependency for that
 part — consistent with this project's general bias against a dependency
 for something a few lines of native code already covers (env vars,
 `--env-file`; see also the root project's own reasoning, `CLAUDE.md` →
-"Environment variables"). The `sub` **shape** check, though, does use the
-`uuid` package (`validate`/`version`) — decided in review: a hand-rolled
-UUID regex is exactly the kind of thing that's easy to get subtly wrong
-(version/variant nibbles), and a well-maintained, single-purpose library
-is the cleaner call here, unlike the token-decoding itself which is
-genuinely trivial. `uuid` (v9+) ships ESM-only, while this whole
-sub-project is CommonJS — a static `import ... from 'uuid'` doesn't
-compile, so it's loaded via a dynamic `import('uuid')` inside the method
-instead (Node's own documented way for a CJS module to consume an
-ESM-only package), which is why `expectTokenIsValid` is `async` despite
-doing no I/O of its own. `decode` stays a private method; only
+"Environment variables"). The `sub` **shape** check delegates to
+`commonHelper.isValidUuidV4()` (see "commonHelper.ts" below) rather than
+a hand-rolled regex — decided in review: getting UUID version/variant
+nibbles subtly wrong is exactly the kind of mistake a well-maintained,
+single-purpose validator avoids. `decode` stays a private method; only
 `expectTokenIsValid` (which calls it) is exposed, since nothing currently
-needs the bare claims outside an assertion. Named `expectTokenIsValid`,
-not `validate`, because — unlike `ResponseContract.validate` — nothing
-downstream consumes the decoded claims, so there's no "returns typed data"
-naming tension to avoid; a plain void assertion is exactly what it is.
+needs the bare claims outside an assertion. `expectTokenIsValid` is a
+plain synchronous method — no `async`, no dynamic import — since
+`uuid-validate` is a real CJS package (see "commonHelper.ts" below for
+why that particular package). Named `expectTokenIsValid`, not `validate`,
+because — unlike `ResponseContract.validate` — nothing downstream
+consumes the decoded claims, so there's no "returns typed data" naming
+tension to avoid; a plain void assertion is exactly what it is.
+
+**`commonHelper.ts`** (`isValidUuidV4`, added 2026-08-30): a second
+method alongside `signTelegramLoginPayload`, prompted by
+`specs/users/getUsers/filtersByUsername.spec.ts` needing the exact same UUID v4 check `jwtHelper.ts`
+already did inline for the JWT `sub` claim — the second consumer this
+project's own "extract once a second spec needs the same shape" bar asks
+for (see "Test data & cleanup" below). Confirms `commonHelper.ts` is a
+general-purpose helper by design, not a Telegram-only one that happened
+to get a second method — `signTelegramLoginPayload` was just its first
+occupant. Originally implemented as a fresh, single-purpose
+`helpers/uuidHelper.ts` (mirroring one-file-per-concern the way
+`jwtHelper.ts`/`responseContractHelper.ts` each own one thing) and folded
+into `commonHelper.ts` instead once discussed — `commonHelper.ts` is
+where genuinely miscellaneous, no-single-theme utilities belong, and a
+second single-method file would just fragment that further. Originally
+prototyped using the `uuid` package's `validate`/`version` functions
+behind a dynamic `import('uuid')` (the same ESM-only workaround
+`jwtHelper.ts` used to need, see below) — **replaced with the
+`uuid-validate` package instead** (decided 2026-08-30, review): it's a
+tiny, dependency-free, genuinely CommonJS package (`main`, no `"type":
+"module"`), so a plain static `import validate from 'uuid-validate'`
+works with this project's `esModuleInterop`, no dynamic import needed
+anywhere. Its `validate(uuid, version)` does the same version/variant
+nibble check `uuid`'s `validate`+`version` combo did — read its (tiny,
+7KB) source directly before trusting it, not just the README. `uuid` was
+removed from `package.json` entirely once nothing else needed it — the
+whole ESM-only-CJS-project workaround it required (`jwtHelper.ts`'s old
+`async`-only-for-a-dynamic-import shape) went away with it, not just
+moved.
+
+**`commonHelper.randomInt(min, max)`** (added 2026-08-31, prompted by
+`specs/users/setSearchProfileLimit/setsRandomLimit.spec.ts` — see "PATCH
+/users/:id/search-profile-limit coverage" below): a plain inclusive
+`Math.floor(Math.random() * (max - min + 1)) + min`. Generic, not named
+after the one field that first needed it (`randomSearchProfileLimit()`
+was considered and rejected) — `commonHelper.ts` is the general-purpose
+file specifically so a primitive like "a random integer in a range"
+lives once and gets reused, the same reasoning that put `isValidUuidV4`
+here rather than in a single-purpose file.
 
 **`mcp-openapi-server/`** (decided 2026-08-17): a small, hand-written,
 read-only MCP server (official `@modelcontextprotocol/sdk`), not a
@@ -362,7 +466,7 @@ not a second `PrismaClient` connection the way integration tests do it.
 **Cleanup wired up (2026-08-27, revised 2026-08-28), closing the gap open
 since 2026-08-17.** `UsersApi.delete(accessToken, userId)` wraps `DELETE
 /users/:id` (self-service — each created user deletes itself, no admin
-token needed for this). `specs/auth/login.spec.ts` tracks the one user it
+token needed for this). `specs/auth/login/returnsBearerToken.spec.ts` tracks the one user it
 creates via two `describe`-scoped `let` variables (`loginResponseBody`,
 `user`), assigned inside the test body, and a single `test.afterAll`
 reads them back to call `delete(loginResponseBody.token, user.id)` —
@@ -406,8 +510,13 @@ The payoff: `afterAll` now reads exactly like a normal test body —
 context construction left in the spec at all.
 
 This pattern (`describe`-scoped tracking variables + `afterAll` teardown)
-is specific to this one spec file for now — extract it into a shared
-helper once a second spec needs the same shape, not before.
+was specific to `login/returnsBearerToken.spec.ts` alone until
+`specs/users/getUsers/filtersByUsername.spec.ts` (added 2026-08-30, see
+"GET /users coverage" below) started duplicating it
+verbatim — the "extract once a second spec needs the same shape" trigger
+this section originally deferred has now fired. Not extracted yet as of
+this writing — flagged here so it isn't lost, not addressed in the same
+change that introduced the second occurrence.
 
 ## E2E admin identity (added 2026-08-18, revised 2026-08-19)
 
@@ -461,9 +570,26 @@ separate identity that's actually an admin.
   limit (5 req/min per `telegramUserId`, root `CLAUDE.md`) as more
   admin-scoped tests get added.
 - **`api/users/UsersApi.ts`** — wraps `GET /users`
-  (`list(accessToken, params?: ListUsersParams)`, bearer auth via header)
-  and `DELETE /users/:id` (`delete(accessToken, userId)`, added 2026-08-27
-  for cleanup — see "Test data & cleanup" above).
+  (`getUsers(accessToken, params?: ListUsersParams)`, bearer auth via
+  header) and `DELETE /users/:id` (`deleteUser(accessToken, userId)`,
+  added 2026-08-27 for cleanup — see "Test data & cleanup" above; named
+  `delete()` until 2026-08-31, renamed to `deleteUser()` — matching the
+  controller's own `UsersController.deleteUser` handler name — once
+  `DELETE /users/:id` needed its own `specs/users/deleteUser/` subfolder
+  as a first-class endpoint under test rather than only ever being called
+  for cleanup; 7 call sites across every existing spec updated in the
+  same pass, `routes.users.deleteById` left as-is since it already
+  describes the route shape regardless of what the client method is
+  called). `getUsers()`
+  was named `list()` until 2026-08-30, renamed for the same "file name
+  should describe what's being tested" reasoning behind the spec naming
+  decision below — `routes.users.list` renamed to `routes.users.getUsers`
+  alongside it. (This rename happened in two passes: first reasoning by
+  "file name mirrors the API method name" like `login.spec.ts` ⇄
+  `AuthApi.login`, then the spec file itself was renamed again shortly
+  after once scenario-based spec naming was decided — see "Spec naming:
+  atomic files" below. The method/route rename stands regardless of how
+  the spec file ended up named.)
   `ListUsersParams` (`api/users/interfaces/`) mirrors the live query params
   (`telegramUsername`, `limit`, `offset`) — named to match the server's
   actual `ListUsersQueryDto` field, not renamed on the client side.
@@ -471,7 +597,7 @@ separate identity that's actually an admin.
   client — renamed together 2026-08-23 (see root `CLAUDE.md` → "Admin
   access to Search Profiles and Users") once review caught that a generic
   "search" name didn't say what it actually filters on.
-  `list()` builds a `URLSearchParams` from whichever params are actually
+  `getUsers()` builds a `URLSearchParams` from whichever params are actually
   set, skipping `undefined` — chosen over widening `ListUsersParams` with
   an index signature (would silently accept unrelated extra keys) or
   casting at the call site (doesn't explain anything, just suppresses the
@@ -480,6 +606,381 @@ separate identity that's actually an admin.
 - Not treated as a generic "admin API client for testing admin features"
   — scoped to what this one persistence check needs. Extend it if/when a
   real admin-focused e2e test is written.
+
+## Spec naming: atomic files (added 2026-08-30)
+
+**One `test()` per spec file, from here on — file name describes the
+scenario, not the endpoint/API method.** `login.spec.ts` (original name)
+and the first `users` spec both already held exactly one test each, so
+this was already true in practice; made explicit once ClickUp task
+869er68uh's scenario list (~8-9 positive/negative cases across three
+`users` endpoints, see "GET /users coverage" below) made clear that
+naming a file after the bare API method doesn't scale — you can't have
+`getUsers.spec.ts`, `getUsers.spec.ts`, and `getUsers.spec.ts` for three
+different `GET /users` scenarios.
+
+- **A subfolder per endpoint, one per `api/` method — applied
+  universally, not gated by scenario count** (revised twice on
+  2026-08-31; this is the second revision, superseding the first). First
+  cut kept every spec flat in its domain folder (`specs/users/`,
+  `specs/auth/`), reasoning that an extra nesting level was speculative
+  structure ahead of real need. Revised once `GET /users` alone reached
+  10 files in that one flat folder — the folder itself, not just
+  individual file names, had become hard to scan, a *real*, materialized
+  need. That first revision still tried to keep the bar scenario-count-based
+  ("only nest once an endpoint heads toward double digits", `specs/auth/`
+  explicitly left flat since `login` has exactly one scenario) — revised
+  *again*, same day, once that inconsistency itself became the objection:
+  a single-scenario `auth/login.spec.ts` sitting flat next to a
+  ten-scenario `users/getUsers/*.spec.ts` subfolder meant two different
+  rules depending on which domain you were looking at, which is worse for
+  actually finding things than one predictable rule applied everywhere.
+  Settled on: every endpoint gets its own subfolder, always, so the path
+  shape is uniform (`specs/<domain>/<endpointMethod>/<scenario>.spec.ts`)
+  regardless of how many scenarios that endpoint currently has — `login/`
+  holds one file today for the same reason `getUsers/` holds ten, not by
+  a different rule. Applied retroactively: `specs/auth/login.spec.ts` →
+  `specs/auth/login/returnsBearerToken.spec.ts` (and the matching
+  `testData/auth/login.ts` → `testData/auth/login/returnsBearerToken.ts`),
+  same pass as the `users`/`getUsers` move.
+- **File name shape inside a domain folder (no endpoint subfolder yet):
+  `<endpointMethod><Scenario>.spec.ts`**; **inside a per-endpoint
+  subfolder (now the default everywhere), just `<scenario>.spec.ts`** —
+  the endpoint name lives in the folder name, so keeping it in the file
+  name too would just be duplication (e.g.
+  `specs/users/getUsers/filtersByUsername.spec.ts`, not
+  `specs/users/getUsers/getUsersFiltersByUsername.spec.ts`;
+  `specs/auth/login/returnsBearerToken.spec.ts`, not
+  `specs/auth/login/loginReturnsBearerToken.spec.ts`). A corresponding
+  `testData/.../<sameName>.ts` follows the spec file 1:1 and mirrors the
+  same nesting.
+- **`test.describe(...)` names: `'<endpoint> → <short scenario>'`**
+  (revised 2026-08-31) — first cut left every spec's `describe` as the
+  bare endpoint (`'GET /users'`, `'POST /auth/telegram'`), reasoning that
+  it groups by endpoint for readability and costs nothing extra even with
+  one test per file. Revisited once enough `GET /users` specs existed for
+  that identical text to show up ten times in the Playwright/Testomat.io
+  report with nothing to tell them apart at that level (only the test
+  title further down the line differed). Now every `describe` pairs the
+  endpoint with an abbreviated version of the file's own scenario — not
+  the full test title verbatim, to avoid the title repeating twice per
+  report line (e.g. `rejectsInvalidLimit.spec.ts` →
+  `'GET /users → limit below min'`, test title still the fuller
+  `'Rejects an out-of-range limit with 400'`). Applied to `login/
+  returnsBearerToken.spec.ts` too, for the same consistency reasoning as
+  the subfolder move above, even though `'POST /auth/telegram'` alone was
+  already unambiguous on its own: `'POST /auth/telegram → returns bearer
+  token'`.
+
+## GET /users coverage (added 2026-08-30)
+
+ClickUp task 869er68uh ("E2E: Cover Users endpoints") tracks dedicated
+coverage of the `users` module, previously only exercised indirectly as a
+side effect of `login/returnsBearerToken.spec.ts`. Built incrementally, one atomic spec per
+scenario (see "Spec naming: atomic files" above) — the per-test detail
+(which field, which constant) lives in the spec file itself via
+descriptive `expect(..., message)` calls, not restated here; this section
+only tracks what isn't obvious from reading the file.
+
+- **`specs/users/getUsers/filtersByUsername.spec.ts`** — originally also
+  asserted `user.id`'s UUID-v4 shape and `user.createdAt`'s date-time
+  shape by hand. Removed the same day: `ListUsersResponseSchema` already
+  declares `format: 'uuid'`/`format: 'date-time'` on those fields, and
+  Ajv's `validateFormats` defaults to `true`, so `responseContract.validate`
+  already rejects a malformed value on every `GET /users` response — verified
+  directly (compiled the schema standalone, confirmed a malformed value
+  fails validation) before removing, not assumed. `commonHelper.isValidUuidV4()`
+  itself stays; it's still the right tool where schema validation doesn't
+  reach, e.g. `jwtHelper.ts`'s decoded JWT `sub` claim.
+- **`specs/users/getUsers/returnsAllUsers.spec.ts`** — calls `GET /users`
+  with no filter. Asserts `users.length` is at least
+  `minimumExpectedUserCount` (2 — the e2e admin identity plus this test's
+  own user), not an exact count, since concurrent spec runs may
+  transiently add their own not-yet-cleaned-up users (cleanup is
+  per-spec, see "Test data & cleanup" above). Deliberately does **not**
+  search the response for the created user (no `.find()`/`.filter()` on
+  `listBody.users`, no presence assertion) — two reasons at once: (a) once
+  real user counts exceed `DEFAULT_PAGE_LIMIT`, a fresh user isn't
+  guaranteed to land on the unpaginated default page, which would make a
+  presence check flaky through no fault of the endpoint; (b) "a specific
+  user is findable via the API" is already fully covered by
+  `filtersByUsername.spec.ts`, so re-checking it here would just
+  be redundant coverage carrying that same flakiness risk for no new
+  signal. Instead, `afterAll`'s `createdUserId` comes straight from
+  `jwtHelper.decode(loginResponseBody.token).sub` — the JWT's `sub` claim
+  already **is** `User.id` (verified by `jwtHelper.expectTokenIsValid`
+  elsewhere), so cleanup never depends on this test's own list response
+  at all. **Known, accepted limitation:** `expect(listBody.total, ...).toBe(listBody.users.length)`
+  shares the same "total stays under `DEFAULT_PAGE_LIMIT`" assumption —
+  a `Math.min(total, limit)`-based rewrite that holds at any scale was
+  considered and deliberately not made (2026-08-30); left as the simpler
+  literal-equality form for now, revisit once real user counts approach
+  `DEFAULT_PAGE_LIMIT`, same trigger as the rest of this bullet.
+- **`specs/users/getUsers/filtersByNonexistentUsername.spec.ts`** — a
+  `telegramUsername` guaranteed to match no real user (DTO-level, this
+  query param is a plain `@IsString()` with no format constraint, see
+  `ListUsersQueryDto` — there's no malformed-input 400 case to test here,
+  only "found nothing"). Creates no user and needs no `afterAll`: nothing
+  to clean up when the whole point is that this username never matches
+  anything.
+- **`specs/users/getUsers/rejectsNonAdmin.spec.ts`** — first negative spec
+  for this endpoint (`AdminGuard` → `403`, the one negative scenario
+  869er68uh names explicitly for `GET /users`). Calls the endpoint with an
+  ordinary self-service user's own bearer token, not an admin one — no
+  `apiHelper` involved. Asserted via a plain `expect(response.status(), ...)`,
+  not `responseContract.validate` — checked live via `mcp-openapi-server`
+  first: `GET /users`'s `403` response has no `application/json` schema in
+  the spec at all (`@ApiForbiddenResponse` has no `type:`), so there's
+  nothing to validate the body against; `httpStatus.FORBIDDEN` (403) was
+  added to `constants/httpStatus.ts` for this. Cleanup deletes the created
+  user via its own (non-admin) token — self-service delete needs no admin
+  rights, only ownership (see root `CLAUDE.md` → "Self-service account
+  deletion").
+- **`rejectsInvalidLimit.spec.ts`** (`limit=0`, violates
+  `ListUsersQueryDto`'s `@Min(1)`) — the *one* representative
+  invalid-`limit`/`offset` spec for this endpoint. **Trimmed down from
+  six on 2026-08-31**, after a testing-pyramid brainstorm: this file
+  originally had five siblings (`rejectsLimitAboveMax.spec.ts` /
+  `@Max`, `rejectsNegativeLimit.spec.ts` / `@Min` again with a different
+  value, `rejectsNonIntegerLimit.spec.ts` / `@IsInt`,
+  `rejectsNegativeOffset.spec.ts` and `rejectsNonIntegerOffset.spec.ts`
+  mirroring the same two mechanisms for `offset`) — one file per
+  `class-validator` boundary. All six passed, but none of them tested
+  anything specific to this being a *deployed, running* system: `@Min`/
+  `@Max`/`@IsInt` on a DTO is pure, deterministic `class-validator`
+  behavior with zero infrastructure dependency, exactly the kind of case
+  a root-project unit test on `ListUsersQueryDto` itself proves in
+  milliseconds, with no network, no admin login, no rate-limit exposure.
+  Decided: e2e keeps exactly one "invalid input → 400" case per endpoint,
+  as a smoke check that `ValidationPipe` is actually wired on the real,
+  deployed route — not an exhaustive boundary matrix; the matrix belongs
+  at the unit tier instead (not yet added there — tracked as follow-up,
+  not this ticket's scope). `MAX_PAGE_LIMIT` (added to `constants/index.ts`
+  for the now-deleted above-max case) was removed again, since nothing
+  else needs it. Corresponding Testomat.io test cases
+  (`dcf83b5f`, `cd605a0f`, `4aff2e4f`, `1e75b6b2`, `969b762c`) deleted via
+  `mcp__testomatio__tests_delete`, not just abandoned — an orphaned
+  Testomat.io entry with no matching spec is worse than no entry at all.
+  **Requires a valid admin token, not an unauthenticated or non-admin
+  one** — Nest's request lifecycle runs guards before pipes, so calling
+  with a bad/missing token would hit `AdminGuard`/`JwtAuthGuard`
+  (401/403) before `ValidationPipe` ever inspects `limit`, testing the
+  wrong layer entirely. `httpStatus.BAD_REQUEST` (400) added alongside
+  `FORBIDDEN` for this.
+
+All five link to Testomat.io test cases (`@T8a3ffb44`, `@Td2e104b0`,
+`@Tfecf8354`, `@Tc53f1b89`, `@Td1102f2e`) via `mcp__testomatio__tests_create`
+— see "Testomat.io reporting" below, and "Testomat.io suite structure"
+just below for where they live.
+
+**Testomat.io suite structure mirrors `specs/` exactly, one level for
+each folder level (revised 2026-08-31, same two-pass change as the local
+subfolder move above).** All 11 tests originally sat flat in one
+auto-created `product.backend` suite (`a5083c07`, `file_type: "file"`) —
+reorganized into `product.backend` (converted to `file_type: "folder"`)
+→ `auth` (`23bf007b`, converted to `folder`) → `login` (`ba3b0ba0`,
+holds `login/returnsBearerToken.spec.ts`'s `@T2ec3d41f`), and `users`
+(`a1ed15fe`, `folder`) → `getUsers` (`3e0ddf19`, held all ten `GET
+/users` tests at the time of this move — trimmed to five shortly after,
+see "GET /users coverage" above) — four suite levels total
+(`product.backend/auth/login`, `product.backend/users/getUsers`),
+matching `specs/auth/login/` and `specs/users/getUsers/` one level for
+one level. `auth` was flattened directly under `product.backend` at
+first (mirroring the local structure's own first pass, which also left
+`specs/auth/` flat) and converted to hold a `login` child suite in the
+same second pass that added the local `login/` subfolder — for the same
+"uniform path shape regardless of current scenario count" reasoning (see
+"Spec naming: atomic files" above), not because `login` itself grew past
+one test. A suite can't hold both direct tests and child suites at once
+(`file_type: "folder"` update is rejected with a 422 while any test still
+references it directly), so converting a suite to a folder always means:
+create the new child suite(s) first (initially parentless, since the
+would-be parent isn't a folder yet), move every test into them, convert
+the now-empty former-leaf suite to `folder`, then reparent the new child
+suite(s) under it — not a single atomic operation, done twice here
+(once for `users`/`getUsers`, once more for `auth`/`login`). Moving a
+test between suites (`tests_update`'s `suite_id`) doesn't affect the
+`@T<id>` tag or break CI reporting/linking — `@testomatio/reporter`'s
+`linkTest()` matches by the test's own id, not by suite path, verified by
+re-running the full suite after each move (same tags linked
+successfully both times).
+
+## PATCH /users/:id/search-profile-limit coverage (added 2026-08-31)
+
+Second `users` endpoint against 869er68uh, same incremental
+one-scenario-at-a-time approach as `GET /users`. Own subfolder
+(`specs/users/setSearchProfileLimit/`, Testomat.io suite `26521242`
+under `users`) from the start, per "Spec naming: atomic files" above —
+no flat-first phase for this one, unlike `getUsers`/`login`'s original
+history.
+
+- **`setsRandomLimit.spec.ts`** — first spec, a random valid limit via
+  `commonHelper.randomInt(1, 1000)` rather than a fixed literal, so the
+  assertion (`searchProfileLimit` in the response equals what was sent)
+  can't accidentally pass because of a coincidental match with some other
+  hardcoded value elsewhere. The random value is computed once in
+  `testData/.../setsRandomLimit.ts` at module load (not inside the test
+  body) — `randomLimitMin`/`randomLimitMax` (1/1000) stay local consts in
+  that file, only the resulting `randomLimit` is exported, same "testData
+  holds the actual input value" shape as every other spec's testData.
+  Range `[1, 1000]` deliberately excludes `0` — `0` is a legal,
+  meaningful value here (disables new Search Profile creation, see root
+  `CLAUDE.md` → "Admin override mechanism") split into its own separate
+  spec (`setsLimitToZero.spec.ts`, below) rather than folded into the
+  random-value case. No chosen upper bound exists on the server side
+  (`SetSearchProfileLimitDto` has `@Min(0)`, no `@Max`) — `1000` is just
+  this suite's own arbitrary "large enough to not look like a boundary
+  value" choice, not a real constraint being tested.
+- **`setsLimitToZero.spec.ts`** — `0` specifically, verifying it's
+  accepted (not rejected the way a negative value would be — `0` passes
+  `@Min(0)`, unlike `GET /users`'s `limit`/`offset` which both reject
+  `0`/negative differently per field, see "GET /users coverage" above;
+  worth its own spec precisely because `0` is a legitimate edge value
+  here, not an invalid one).
+- **Both specs verify persistence, not just the `PATCH` response** — a
+  follow-up `GET /users?telegramUsername=` (admin token) confirms
+  `searchProfileLimit` actually landed in the row, catching a
+  hypothetical bug where the endpoint echoes back the requested value in
+  its response without actually saving it. Added after `setsRandomLimit.spec.ts`'s
+  first draft only checked the `PATCH` response body.
+- `UsersApi.setSearchProfileLimit(accessToken, userId, limit)` (new
+  method) and `routes.users.setSearchProfileLimit(id)` added alongside
+  the existing `getUsers`/`delete`. `SetSearchProfileLimitResponseSchema`
+  pulled live the same way every other schema here is (see "Response
+  schema validation" above) — this endpoint's response DTO already had
+  its `type:` wired up server-side (root `CLAUDE.md`'s "Response DTOs are
+  required too"), so, unlike the `GET /users` negative specs, this one
+  *does* have a schema to validate against even on the success path.
+- Target user's `id` for the `PATCH` call comes from the same
+  JWT-`sub`-decode approach as `getUsers/returnsAllUsers.spec.ts` (see
+  "GET /users coverage" above) — login once, decode, use directly —
+  rather than a second lookup call.
+
+**Negative specs (added 2026-08-31), written applying the trimmed-down
+rule from the start** (see "GET /users coverage" above → the six-to-one
+`rejectsInvalidLimit.spec.ts` trim) rather than over-building and
+trimming after, this time:
+
+- **`rejectsNonAdmin.spec.ts`** — `AdminGuard` → `403`, same shape as
+  `getUsers/rejectsNonAdmin.spec.ts` (log in an ordinary user, call the
+  endpoint with their own token, no `apiHelper` involved). Targets the
+  caller's own id (from the JWT `sub`) — irrelevant to the outcome, since
+  `AdminGuard` runs before the handler ever reads `:id`, but using a real
+  id keeps the call realistic rather than reaching for a throwaway one.
+- **`rejectsInvalidLimit.spec.ts`** — the *one* representative
+  invalid-`limit` case (`limit=-1`, violates `SetSearchProfileLimitDto`'s
+  `@Min(0)`) → `400`. Deliberately not paired with a non-integer sibling
+  this time (unlike the six-spec `GET /users` history this rule reacted
+  to) — one case per endpoint is the rule now, not "one per field like
+  before, then trim."
+- **`rejectsNonexistentUser.spec.ts`** — a random, well-formed
+  (`randomUUID()`) but never-created id → `404` (`UserNotFoundError`,
+  mapped by `SetSearchProfileLimitUseCase`). Unlike the `class-validator`
+  cases, this one earns its e2e place under the same rule rather than
+  despite it: "does this id exist" is use-case-level branching logic
+  specific to this endpoint, not generic DTO shape validation reusable
+  across the whole app — nothing at the unit tier already proves the
+  controller/use-case actually maps a missing row to `404` end-to-end.
+- **`rejectsInvalidLimit.spec.ts` and `rejectsNonexistentUser.spec.ts`
+  create no user at all** — a `randomUUID()` target is enough for both:
+  DTO validation runs before the handler ever queries the database (so
+  the `400` case's id doesn't need to exist), and the `404` case's whole
+  point is that the id *doesn't* exist. No `afterAll`, no `testData` file
+  for either — only `rejectsNonAdmin.spec.ts` logs in a real user (needed
+  for a real non-admin bearer token) and therefore only it needs cleanup.
+- `httpStatus.NOT_FOUND` (404) added alongside `BAD_REQUEST`/`FORBIDDEN`
+  for this. None of the three has a response schema in the live spec
+  (checked via `mcp-openapi-server` before writing any of them) — same
+  plain `expect(response.status(), ...)` shape as every other
+  no-schema negative case in this file.
+
+## DELETE /users/:id coverage (added 2026-08-31)
+
+Third `users` endpoint against 869er68uh, and the last one this ticket
+covers. Own subfolder from the start (`specs/users/deleteUser/`,
+Testomat.io suite `12c1ce9a` under `users`), same as
+`setSearchProfileLimit`.
+
+- **`deletesSelf.spec.ts`** — the self-service positive case (log in,
+  delete your own account with your own token, `204`). **No `afterAll`,
+  deliberately** — unlike every other spec in this file, the action under
+  test *is* the cleanup; adding a second delete call after an already-
+  successful one would just be asserting the same thing twice (and would
+  itself now correctly `404`, since the row is already gone). Verifies
+  more than the status code: a follow-up admin `GET
+  /users?telegramUsername=` confirms the user is actually gone (`users:
+  []`, `total: 0`), not just that the endpoint returned `204` — same
+  "verify persistence, don't trust the response alone" reasoning as
+  `setSearchProfileLimit`'s specs (see above). `httpStatus.NO_CONTENT`
+  (204) added; no response schema exists for this status by HTTP
+  definition (a `204` has no body), matching root `CLAUDE.md`'s own
+  `@ApiNoContentResponse` exception to "every response needs a `type:`".
+- **Scope note, not a gap**: the original ticket description for this
+  endpoint also says self-deletion "cascades to their Search Profiles" —
+  not verified here. No Search Profile e2e coverage or API client exists
+  in this suite yet (that's ClickUp 869er68qq/869er68qu, both still
+  open). Flagged directly on 869er68qq (the self-service Search Profiles
+  ticket, since cascade-on-delete is closest to that module's own CRUD
+  scope) rather than silently dropped — pick it up once `POST
+  /search-profiles` is e2e-callable: create a user, create a profile for
+  them, delete the user, confirm the profile is gone too.
+- **`adminDeletesUser.spec.ts`** — the admin-override positive case,
+  same shape as `deletesSelf.spec.ts` but `deleteUser()` is called with
+  the *admin's* token, not the target's own — the only difference
+  between the two specs is which bearer token authorizes the call. No
+  `afterAll` here either, same reasoning: the admin's delete call is
+  itself the cleanup.
+- **`rejectsNonOwner.spec.ts`** — the one negative case that actually
+  needs real cleanup in this endpoint's coverage: an "attacker" (a real,
+  logged-in, non-admin, non-owning user) attempts to delete a "victim"
+  (a second, separate real user) and is rejected with `404` — the
+  enumeration-safe pattern already established for Search Profiles (root
+  `CLAUDE.md` → Security), not a `403` that would leak whether the id
+  exists. Since the delete attempt under test is *expected to fail*,
+  neither the victim nor the attacker actually get removed by it — this
+  spec is the only one of the four with a real `afterAll`, self-deleting
+  both created users via their own tokens.
+- **`rejectsNonexistentUser.spec.ts`** — same shape as
+  `setSearchProfileLimit/rejectsNonexistentUser.spec.ts`: a
+  `randomUUID()` target guaranteed not to belong to any real user, admin
+  token, `404`. No user created, no `afterAll`, no `testData` file.
+- All four link to Testomat.io test cases (`@T66a36d1c`, `@T4ef0f916`,
+  `@T8e752430`, `@T2f3ed283`) in the `deleteUser` suite.
+
+## Synthetic data naming (added 2026-08-30)
+
+Every login this suite performs creates a real row in the production
+`users` table (see "Test data & cleanup" above) — `telegramUsername`
+values need to stay recognizable as synthetic, greppable via a plain
+`WHERE telegram_username LIKE 'e2e\_%'`, without adding an `isTest`/
+`environment` field to the domain model (a separate, deliberate decision
+— domain doesn't get shaped around test infrastructure for a
+not-yet-live risk with zero real users to confuse test data with).
+
+**Convention: `e2e_` prefix (lowercase, underscore), on `telegramUsername`
+only.** Landed on this specifically because `helpers/apiHelper.ts` already
+had a real, shipped precedent — `ADMIN_USERNAME = 'e2e_admin'` — predating
+this discussion; matching it beat inventing a second, competing style
+(`e2e-` with a dash and `_E2E_` wrapped-uppercase were both considered and
+dropped for exactly that reason). Scoped to `telegramUsername` alone, not
+`telegramUserId`: the latter is a random `randomUUID()` value in test data
+standing in for what a real Telegram numeric id would be, and stays
+opaque/unprefixed to keep that resemblance — `telegramUsername` is
+already the human-readable, directly-queryable field (it's what `GET
+/users?telegramUsername=` filters on), so it's the one that actually needs
+to read as synthetic at a glance.
+
+Applied so far: `testData/auth/login/returnsBearerToken.ts`
+(`e2e_login_${Date.now()}`), `testData/users/getUsers/filtersByUsername.ts`
+(`e2e_get_users_${Date.now()}`), and
+`testData/users/setSearchProfileLimit/setsRandomLimit.ts`
+(`e2e_set_limit_random_${Date.now()}`) — a `e2e_<spec-context>_<timestamp>`
+shape, `<spec-context>` naming what the spec covers, `<timestamp>`
+keeping concurrent runs from colliding on the exact same username. Apply
+the same `e2e_<context>_${Date.now()}` shape to every future spec's
+synthetic `telegramUsername`, and the equivalent recognizable prefix in
+`SearchProfile.name` once specs start creating those (869er68qq/869er68qu)
+— not a new pattern to invent per spec.
 
 ## CI: running against a live deploy (added 2026-08-28)
 

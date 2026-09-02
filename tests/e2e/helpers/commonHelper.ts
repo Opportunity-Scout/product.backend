@@ -1,4 +1,5 @@
 import { createHash, createHmac } from 'crypto';
+import validate from 'uuid-validate';
 import { TelegramLoginFields, TelegramLoginPayload } from '../api/auth/interfaces';
 
 class CommonHelper {
@@ -13,6 +14,14 @@ class CommonHelper {
     const hash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
     return { ...fields, hash };
+  }
+
+  public isValidUuidV4(value: string): boolean {
+    return validate(value, 4);
+  }
+
+  public randomInt(min: number, max: number): number {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 }
 
