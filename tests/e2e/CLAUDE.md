@@ -15,6 +15,16 @@ allowed to diverge from the root `CLAUDE.md` where it makes sense — they're
 two different kinds of codebase (a NestJS app vs. a Playwright test suite)
 sharing a git repo, not one project with two test tiers.
 
+**Writing a new spec? Start with the `e2e-test` skill**
+(`.claude/skills/e2e-test/SKILL.md`, added 2026-09-02), not this file —
+it's the short, procedural "how" (folder/naming conventions, the
+golden-middle scoping rule, Testomat.io linking, cleanup shapes) distilled
+from everything decided here, meant to load instead of the whole history
+below for the common case of "add one more test." This file stays the
+decision log — the *why* behind each convention, dates, alternatives
+considered and rejected — consult it directly when the skill points here
+for deeper reasoning, or when doing something the skill doesn't cover.
+
 ## Stack
 
 Playwright (`@playwright/test`), TypeScript, Node 22 — versions pinned in
