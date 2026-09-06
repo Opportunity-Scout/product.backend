@@ -1,8 +1,8 @@
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
-import { ListUsersResponseSchema } from '../../../schemas/users';
-import { GetUsersListResponse } from '../../../api/users/interfaces';
-import testData from '../../../testData/users/getUsers/filtersByNonexistentUsername';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
+import { ListUsersResponseSchema } from '@/schemas/users';
+import { GetUsersListResponse } from '@/api/users/interfaces';
+import testData from '@/testData/users/getUsers/filtersByNonexistentUsername';
 
 test.describe('GET /users → nonexistent username filter', () => {
   const { nonexistentUsername, expectedEntitiesCount } = testData;

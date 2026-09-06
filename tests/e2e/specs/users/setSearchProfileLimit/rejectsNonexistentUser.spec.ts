@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
 
 test.describe('PATCH /users/:id/search-profile-limit → nonexistent user', () => {
   test('Rejects a nonexistent user id with 404', { tag: '@T9277ae5b' }, async ({ backendApi, apiHelper }) => {

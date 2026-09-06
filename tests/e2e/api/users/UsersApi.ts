@@ -1,5 +1,5 @@
 import { APIRequestContext, APIResponse } from '@playwright/test';
-import { routes } from '../../constants';
+import { routes } from '@/constants';
 import { ListUsersParams } from './interfaces';
 
 export class UsersApi {

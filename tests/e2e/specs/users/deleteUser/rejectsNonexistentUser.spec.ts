@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
 
 test.describe('DELETE /users/:id → nonexistent user', () => {
   test('Rejects a nonexistent user id with 404', { tag: '@T2f3ed283' }, async ({ backendApi, apiHelper }) => {

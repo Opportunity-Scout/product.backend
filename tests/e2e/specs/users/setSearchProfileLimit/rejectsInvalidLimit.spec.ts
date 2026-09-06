@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
 
 test.describe('PATCH /users/:id/search-profile-limit → negative limit', () => {
   test('Rejects a negative limit with 400', { tag: '@Te21d603b' }, async ({ backendApi, apiHelper }) => {

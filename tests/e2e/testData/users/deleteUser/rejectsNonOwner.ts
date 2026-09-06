@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { TelegramLoginFields } from '../../../api/auth/interfaces';
+import { TelegramLoginFields } from '@/api/auth/interfaces';
 
 const victimLoginPayload: TelegramLoginFields = {
   id: randomUUID(),

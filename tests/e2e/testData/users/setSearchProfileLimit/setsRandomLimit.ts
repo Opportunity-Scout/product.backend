@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
-import { TelegramLoginFields } from '../../../api/auth/interfaces';
-import { commonHelper } from '../../../helpers/commonHelper';
+import { TelegramLoginFields } from '@/api/auth/interfaces';
+import { commonHelper } from '@/helpers/commonHelper';
 
 const randomLimitMin = 1;
 const randomLimitMax = 1000;

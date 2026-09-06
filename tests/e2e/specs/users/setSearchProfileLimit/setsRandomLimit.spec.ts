@@ -1,11 +1,11 @@
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
-import { LoginResponseSchema } from '../../../schemas/auth';
-import { ListUsersResponseSchema, SetSearchProfileLimitResponseSchema } from '../../../schemas/users';
-import { GetUsersListResponse, SetSearchProfileLimitResponse } from '../../../api/users/interfaces';
-import { TelegramLoginResponse } from '../../../api/auth/interfaces';
-import { jwtHelper } from '../../../helpers/jwtHelper';
-import testData from '../../../testData/users/setSearchProfileLimit/setsRandomLimit';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
+import { LoginResponseSchema } from '@/schemas/auth';
+import { ListUsersResponseSchema, SetSearchProfileLimitResponseSchema } from '@/schemas/users';
+import { GetUsersListResponse, SetSearchProfileLimitResponse } from '@/api/users/interfaces';
+import { TelegramLoginResponse } from '@/api/auth/interfaces';
+import { jwtHelper } from '@/helpers/jwtHelper';
+import testData from '@/testData/users/setSearchProfileLimit/setsRandomLimit';
 
 test.describe('PATCH /users/:id/search-profile-limit → sets random limit', () => {
   const { randomLimit, newUserLoginPayload } = testData;

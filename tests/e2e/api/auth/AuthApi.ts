@@ -1,7 +1,7 @@
 import { APIRequestContext, APIResponse } from '@playwright/test';
-import { commonHelper } from '../../helpers/commonHelper';
+import { commonHelper } from '@/helpers/commonHelper';
 import { TelegramLoginFields } from './interfaces';
-import { routes } from '../../constants';
+import { routes } from '@/constants';
 
 export class AuthApi {
   constructor(

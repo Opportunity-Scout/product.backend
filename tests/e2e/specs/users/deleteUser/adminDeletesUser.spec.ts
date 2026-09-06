@@ -1,11 +1,11 @@
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
-import { LoginResponseSchema } from '../../../schemas/auth';
-import { ListUsersResponseSchema } from '../../../schemas/users';
-import { GetUsersListResponse } from '../../../api/users/interfaces';
-import { TelegramLoginResponse } from '../../../api/auth/interfaces';
-import { jwtHelper } from '../../../helpers/jwtHelper';
-import testData from '../../../testData/users/deleteUser/adminDeletesUser';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
+import { LoginResponseSchema } from '@/schemas/auth';
+import { ListUsersResponseSchema } from '@/schemas/users';
+import { GetUsersListResponse } from '@/api/users/interfaces';
+import { TelegramLoginResponse } from '@/api/auth/interfaces';
+import { jwtHelper } from '@/helpers/jwtHelper';
+import testData from '@/testData/users/deleteUser/adminDeletesUser';
 
 test.describe('DELETE /users/:id → admin deletes another user', () => {
   const { newUserLoginPayload, zeroEntitiesCount } = testData;
