@@ -24,9 +24,10 @@ test.describe('GET /users → returns all users', () => {
     const adminAccessToken = await apiHelper.getAdminAccessToken();
     const listResponse = await backendApi.users.getUsers(adminAccessToken);
     const listBody: GetUsersListResponse = await responseContract.validate(listResponse, httpStatus.OK, ListUsersResponseSchema);
+    const expectedUsersLength = Math.min(listBody.total, DEFAULT_PAGE_LIMIT);
 
-    expect(listBody.users.length, 'Expected more than one user without a filter').toBeGreaterThanOrEqual(minimumExpectedUserCount);
-    expect(listBody.total, 'total should match the number of returned users').toBe(listBody.users.length);
+    expect(listBody.users.length, 'Returned users should be capped at min(total, limit)').toBe(expectedUsersLength);
+    expect(listBody.total, 'Expected more than one user without a filter').toBeGreaterThanOrEqual(minimumExpectedUserCount);
     expect(listBody.limit, 'limit should default to DEFAULT_PAGE_LIMIT').toBe(DEFAULT_PAGE_LIMIT);
     expect(listBody.offset, 'offset should default to DEFAULT_PAGE_OFFSET').toBe(DEFAULT_PAGE_OFFSET);
   });
