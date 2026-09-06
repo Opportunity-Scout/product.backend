@@ -1,11 +1,11 @@
-import { test, expect } from '../../../fixtures/test';
-import { DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET, DEFAULT_SEARCH_PROFILE_LIMIT, httpStatus } from '../../../constants';
-import { LoginResponseSchema } from '../../../schemas/auth';
-import { ListUsersResponseSchema } from '../../../schemas/users';
-import { GetUsersListResponse, User } from '../../../api/users/interfaces';
-import { UserRole } from '../../../api/users/types/UserRole';
-import { TelegramLoginResponse } from '../../../api/auth/interfaces';
-import testData from '../../../testData/users/getUsers/filtersByUsername';
+import { test, expect } from '@/fixtures/test';
+import { DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET, DEFAULT_SEARCH_PROFILE_LIMIT, httpStatus } from '@/constants';
+import { LoginResponseSchema } from '@/schemas/auth';
+import { ListUsersResponseSchema } from '@/schemas/users';
+import { GetUsersListResponse, User } from '@/api/users/interfaces';
+import { UserRole } from '@/api/users/types/UserRole';
+import { TelegramLoginResponse } from '@/api/auth/interfaces';
+import testData from '@/testData/users/getUsers/filtersByUsername';
 
 test.describe('GET /users → filters by username', () => {
   const { newUserLoginPayload, expectedEntitiesCount } = testData;

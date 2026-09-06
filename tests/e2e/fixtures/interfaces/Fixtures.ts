@@ -1,4 +1,4 @@
-import { ResponseContract } from '../../helpers/responseContractHelper';
+import { ResponseContract } from '@/helpers/responseContractHelper';
 
 export interface Fixtures {
   responseContract: ResponseContract;

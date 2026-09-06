@@ -1,9 +1,9 @@
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
-import { LoginResponseSchema } from '../../../schemas/auth';
-import { TelegramLoginResponse } from '../../../api/auth/interfaces';
-import { jwtHelper } from '../../../helpers/jwtHelper';
-import testData from '../../../testData/users/getUsers/rejectsNonAdmin';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
+import { LoginResponseSchema } from '@/schemas/auth';
+import { TelegramLoginResponse } from '@/api/auth/interfaces';
+import { jwtHelper } from '@/helpers/jwtHelper';
+import testData from '@/testData/users/getUsers/rejectsNonAdmin';
 
 test.describe('GET /users → rejects non-admin', () => {
   const { newUserLoginPayload } = testData;

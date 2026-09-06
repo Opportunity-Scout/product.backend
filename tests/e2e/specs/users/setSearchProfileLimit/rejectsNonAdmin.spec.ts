@@ -1,9 +1,9 @@
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
-import { LoginResponseSchema } from '../../../schemas/auth';
-import { TelegramLoginResponse } from '../../../api/auth/interfaces';
-import { jwtHelper } from '../../../helpers/jwtHelper';
-import testData from '../../../testData/users/setSearchProfileLimit/rejectsNonAdmin';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
+import { LoginResponseSchema } from '@/schemas/auth';
+import { TelegramLoginResponse } from '@/api/auth/interfaces';
+import { jwtHelper } from '@/helpers/jwtHelper';
+import testData from '@/testData/users/setSearchProfileLimit/rejectsNonAdmin';
 
 test.describe('PATCH /users/:id/search-profile-limit → rejects non-admin', () => {
   const { newUserLoginPayload, newLimit } = testData;

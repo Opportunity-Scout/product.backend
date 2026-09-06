@@ -465,6 +465,50 @@ Revisit before authoring `schemas/auth/LoginResponseSchema.ts`: either add a
 proper response DTO to `AuthController`, or accept validating a looser
 shape for that one endpoint until it does.
 
+## Path alias (added 2026-09-06)
+
+ClickUp task 869errvev: once `specs/`/`testData/` moved to the per-endpoint
+subfolder structure (see "Spec naming: atomic files" below), every
+cross-cutting import from a spec or testData file (`fixtures/`, `constants/`,
+`schemas/`, `api/`, `helpers/`, `testData/`) needed a `../../../` chain.
+`tsconfig.json` now maps `@/*` to the project root
+(`"paths": { "@/*": ["./*"] }` — TypeScript 7 removed `baseUrl`, so the
+mapping value itself must already be relative, per the compiler's own
+`TS5102` error pointing at the fix).
+
+**Verified Playwright actually resolves `paths` at runtime, not just at
+typecheck** — this project's own standing rule (see root `CLAUDE.md`,
+"docs/training data lag reality") — rather than assumed from the tsconfig
+change alone: converted `helpers/apiHelper.ts` to `@/`-imports first, ran
+`npm run typecheck` (passed) and `npm test` against a real subset of specs
+(passed, real HTTP calls succeeded), only then rolled the alias out further.
+
+**Scope: every import crossing a top-level folder boundary, except a
+single `../`** — decided over two narrower alternatives considered first:
+- A single-level `../` (e.g. `fixtures/test.ts` → `../constants`,
+  `helpers/apiHelper.ts` → `../api/auth/AuthApi`) stays relative — same
+  reasoning as root `CLAUDE.md`'s own `@app/*` scope ("keep ordinary
+  same-module relative imports as relative... forcing an alias on a
+  one-folder-over import would make it less readable, not more"). Anything
+  `../../` or deeper switches to `@/`.
+- Explicit per-directory `paths` entries (`@/api/*`, `@/constants`,
+  `@/fixtures/*`, `@/helpers/*`, `@/schemas/*`, `@/testData/*`) were
+  considered instead of a single blanket `@/*` — floated as a way to fail
+  loudly on a typo instead of silently matching an unintended top-level
+  path. Rejected on reflection: it doesn't actually close that gap (a
+  wildcard segment can still contain `..` and escape the intended
+  directory either way — `@/api/*` still lets someone write
+  `@/api/../../../secret`), so the only real benefit left was a narrower,
+  self-documented surface at the cost of upkeep (every new top-level
+  folder needs its own entry). Not worth it for a project that already
+  defaults to the simpler, standard `@/*`-to-project-root convention
+  everywhere else.
+
+Same-top-level-folder imports (e.g. `api/users/interfaces/User.ts` →
+`../types/UserRole`, both under `api/users/`) were left untouched either
+way — the alias only applies where an import actually crosses from one
+top-level folder into another.
+
 ## Test data & cleanup
 
 Every test run creates real rows in the real production database (a `User`

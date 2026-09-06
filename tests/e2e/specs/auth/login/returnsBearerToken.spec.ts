@@ -1,11 +1,11 @@
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
-import { LoginResponseSchema } from '../../../schemas/auth';
-import { ListUsersResponseSchema } from '../../../schemas/users';
-import { jwtHelper } from '../../../helpers/jwtHelper';
-import { GetUsersListResponse, User } from '../../../api/users/interfaces';
-import { TelegramLoginResponse } from '../../../api/auth/interfaces';
-import testData from '../../../testData/auth/login/returnsBearerToken';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
+import { LoginResponseSchema } from '@/schemas/auth';
+import { ListUsersResponseSchema } from '@/schemas/users';
+import { jwtHelper } from '@/helpers/jwtHelper';
+import { GetUsersListResponse, User } from '@/api/users/interfaces';
+import { TelegramLoginResponse } from '@/api/auth/interfaces';
+import testData from '@/testData/auth/login/returnsBearerToken';
 
 test.describe('POST /auth/telegram → returns bearer token', () => {
   const { newUserLoginPayload, expectedEntitiesCount } = testData;

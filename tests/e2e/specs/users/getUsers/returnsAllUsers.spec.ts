@@ -1,11 +1,11 @@
-import { test, expect } from '../../../fixtures/test';
-import { DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET, httpStatus } from '../../../constants';
-import { LoginResponseSchema } from '../../../schemas/auth';
-import { ListUsersResponseSchema } from '../../../schemas/users';
-import { GetUsersListResponse } from '../../../api/users/interfaces';
-import { TelegramLoginResponse } from '../../../api/auth/interfaces';
-import { jwtHelper } from '../../../helpers/jwtHelper';
-import testData from '../../../testData/users/getUsers/returnsAllUsers';
+import { test, expect } from '@/fixtures/test';
+import { DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET, httpStatus } from '@/constants';
+import { LoginResponseSchema } from '@/schemas/auth';
+import { ListUsersResponseSchema } from '@/schemas/users';
+import { GetUsersListResponse } from '@/api/users/interfaces';
+import { TelegramLoginResponse } from '@/api/auth/interfaces';
+import { jwtHelper } from '@/helpers/jwtHelper';
+import testData from '@/testData/users/getUsers/returnsAllUsers';
 
 test.describe('GET /users → returns all users', () => {
   const { newUserLoginPayload, minimumExpectedUserCount } = testData;

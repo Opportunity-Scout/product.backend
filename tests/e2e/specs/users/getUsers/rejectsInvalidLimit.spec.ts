@@ -1,5 +1,5 @@
-import { test, expect } from '../../../fixtures/test';
-import { httpStatus } from '../../../constants';
+import { test, expect } from '@/fixtures/test';
+import { httpStatus } from '@/constants';
 
 test.describe('GET /users → limit below min', () => {
   test('Rejects an out-of-range limit with 400', { tag: '@Td1102f2e' }, async ({ backendApi, apiHelper }) => {
