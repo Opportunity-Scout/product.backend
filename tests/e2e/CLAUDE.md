@@ -1001,6 +1001,304 @@ Testomat.io suite `12c1ce9a` under `users`), same as
 - All four link to Testomat.io test cases (`@T66a36d1c`, `@T4ef0f916`,
   `@T8e752430`, `@T2f3ed283`) in the `deleteUser` suite.
 
+## POST /search-profiles coverage (added 2026-09-06)
+
+First spec against ClickUp 869er68qq (E2E: Cover Search Profiles
+self-service CRUD + status transitions) — one atomic scenario at a time,
+same incremental approach as the `users` endpoints above. New
+`api/searchProfiles/`, `schemas/searchProfiles/`,
+`testData/searchProfiles/`, `specs/searchProfiles/` top-level folders,
+scaffolded the same shape as their `users` counterparts. Testomat.io suite
+`42258b76` (`searchProfiles`, folder) → `7019e3f8` (`create`, file) under
+`product.backend`.
+
+- **`returnsCreatedProfile.spec.ts`** — the one positive case for this
+  endpoint so far: create with a payload that only sets `name`,
+  `description`, `preferences.keywords`, and `preferences.location`
+  (`remote: true`, so no country is required), leaving every other
+  `preferences` sub-field unset. Asserts both halves at once: the fields
+  that were sent echo back exactly, *and* the fields that weren't sent
+  come back as their documented defaults (`compensation: { minimumSalary:
+  null, currency: null }`, empty arrays for `seniority`/`employmentTypes`/
+  `companies.include`/`companies.exclude`/`sources`) rather than being
+  omitted — this is what actually exercises `SearchPreferences.create()`'s
+  default-filling (root `CLAUDE.md` → `SearchPreferences` domain model),
+  not just a request/response echo check. Also asserts `lastMatchedAt` is
+  `null` — a freshly created profile has never matched anything yet.
+  The expected-default values themselves (`expectedDefaultCompensation`,
+  `expectedDefaultSeniority`, `expectedDefaultEmploymentTypes`,
+  `expectedDefaultCompanies`, `expectedDefaultSources`) live in
+  `testData/searchProfiles/create/returnsCreatedProfile.ts` as named
+  exports, not inline object/array literals in the spec body — same
+  "testData holds the actual value an assertion depends on" shape
+  `setsRandomLimit.ts`'s `randomLimit` already established, just for an
+  expected-output value here instead of an input one.
+- **`SearchProfileResponseSchema`** pulled live via `mcp-openapi-server`
+  for `POST /search-profiles` → `201` — a real, wired-up response DTO
+  (root `CLAUDE.md`'s "Response DTOs are required too"), so unlike
+  `POST /auth/telegram`'s login response this one validates the full
+  nested `preferences` shape, not just a status-code check.
+- **`api/searchProfiles/interfaces/` — one interface per file, both
+  request and response side** (revised in review from an initial draft
+  that bundled every nested VO into two files, `...Fields.ts`/
+  `SearchProfile.ts` — reverted once compared against this project's own
+  established `api/users/interfaces/` precedent, one flat file per
+  interface, no bundling). Request side named `...Payload`, not `...Fields`
+  (also revised in review): unlike `TelegramLoginFields` (raw input that
+  still needs a `hash` added before it becomes the real
+  `TelegramLoginPayload` wire body), nothing transforms a Search Profile
+  create call's input before it's POSTed — the type *is* the literal
+  request body, so `Payload` is the accurate name, applied at every
+  nesting level for the same reason root `CLAUDE.md`'s `CreateSearchProfileDto`
+  suffixes `Dto` uniformly at every level (`LocationFilterDto`,
+  `SearchPreferencesDto`, ...), not just the top one:
+  `KeywordFilterPayload`, `LocationFilterPayload`,
+  `SalaryExpectationPayload`, `CompanyFilterPayload`,
+  `SearchPreferencesPayload`, `CreateSearchProfilePayload`. Response side
+  stays bare entity/VO names (`SearchProfile`, `SearchPreferences`,
+  `KeywordFilter`, `LocationFilter`, `SalaryExpectation`, `CompanyFilter`)
+  — matching `User`, not `UserResponse`; only an endpoint's *envelope*
+  gets a `Response` suffix here (`GetUsersListResponse`,
+  `SetSearchProfileLimitResponse`), never a plain entity. `status` is
+  typed via a new `api/searchProfiles/types/SearchProfileStatus.ts` enum
+  (`Active`/`Paused`/`Archived`), not a hand-rolled string-literal union —
+  same shape as the existing `api/users/types/UserRole.ts`, referenced
+  directly from specs (`SearchProfileStatus.Active`) rather than a raw
+  `'active'` string literal, so a status typo fails to compile instead of
+  silently comparing against the wrong value.
+- **Cleanup**: `afterAll` deletes the created user via its own token
+  (`DELETE /users/:id`), same self-service pattern as every other spec
+  here — cascades to the Search Profile row too (root `CLAUDE.md` →
+  "Self-service account deletion"), so nothing Search-Profile-specific
+  needed adding to `UsersApi`. This is also the cascade-verification case
+  `deletesSelf.spec.ts` (see "DELETE /users/:id coverage" above) flagged
+  as blocked on Search Profile e2e coverage existing — not picked up in
+  *this* spec (this one doesn't call `DELETE /users/:id` mid-test to
+  check the cascade), still open as a follow-up.
+- **`persistsFullPreferences.spec.ts`** (added 2026-09-06) — the
+  complementary positive case to `returnsCreatedProfile.spec.ts`: that
+  spec only proves *omitted* `preferences` sub-fields default correctly;
+  this one sets every sub-field (`keywords`, `compensation`, `seniority`,
+  `employmentTypes`, `companies`, `sources`) and asserts the whole
+  `preferences` object round-trips exactly via one `toEqual`, rather than
+  a field-by-field walk — safe here specifically because nothing is
+  expected to differ from what was sent (no partial-default-filling to
+  distinguish, unlike the other spec). Deliberately sets
+  `location: { remote: false, countries: [...] }` — the one `LocationFilter`
+  branch `returnsCreatedProfile.spec.ts`'s `remote: true` payload never
+  exercises (root `CLAUDE.md`: "Required if `remote` is false"), so
+  between the two specs both branches of that domain rule are now covered
+  on a real, deployed create call. Chosen over other candidate positive
+  cases (e.g. `description` omitted entirely) as the one genuinely
+  complementary case worth adding — round-trip persistence of every VO
+  field is real, deployed-system behavior a DTO-level unit test can't
+  prove; `description`-omitted is a much smaller, in-practice-provable
+  DTO optionality check.
+- **`rejectsSecondProfileAtLimit.spec.ts`** (added 2026-09-06) — the first
+  negative case for this endpoint, chosen over an invalid-`preferences`-shape
+  case specifically because it's real use-case-level branching
+  (`CreateSearchProfileUseCase`'s free-tier count-and-compare against
+  `user.searchProfileLimit`, root `CLAUDE.md` → "Monetization limit"), not
+  boundary/DTO validation reachable at the unit tier — a better fit for
+  this project's golden-middle e2e-scoping rule. A fresh user defaults to
+  `searchProfileLimit: 1`, so one successful `create()` call (schema-validated,
+  confirming it actually landed as `201` before the real assertion) followed
+  by an identical second call is enough to trigger
+  `SearchProfileLimitExceededError` → `400` — no need for a
+  `DEFAULT_SEARCH_PROFILE_LIMIT`-sized loop. No response schema exists for
+  `POST /search-profiles`'s `400` in the live spec (checked via
+  `mcp-openapi-server` first), so the second call is a plain
+  `expect(status).toBe(httpStatus.BAD_REQUEST)`. Reuses the same
+  `createSearchProfilePayload` for both calls — no uniqueness constraint on
+  `SearchProfile.name` per user, so a second identical payload is a valid,
+  simpler choice than inventing a second one. `httpStatus.BAD_REQUEST` (400)
+  was already in `constants/httpStatus.ts` from the `users` coverage above.
+- **`rejectsInvalidToken.spec.ts`** and **`rejectsUnknownField.spec.ts`**
+  (added 2026-09-06) — two more negative cases, deliberately picked to
+  each exercise a *different* rejection mechanism than
+  `rejectsSecondProfileAtLimit.spec.ts` and than each other, not just
+  another `400`. Two candidates considered and rejected first: a blank
+  `name` and a `remote: false`-without-`country` `preferences` shape are
+  both already unit-tested directly at the domain level
+  (`tests/unit/modules/searchProfile/domain/searchProfile.spec.ts` →
+  `'rejects a blank name'`, `.../valueObjects/locationFilter.spec.ts` →
+  `'rejects remote=false without a country'`), and the HTTP-level
+  "domain `Result.fail` → `400`" wiring both would exercise is already
+  proven by `rejectsSecondProfileAtLimit.spec.ts` via the identical
+  controller catch-all — adding either would be pure redundancy, not new
+  signal, going against the golden-middle rule from the other direction
+  (over-testing, not under-testing).
+  - **`rejectsInvalidToken.spec.ts`** — a random, garbage string as the
+    bearer token → `401`. Originally scoped as "no `Authorization` header
+    at all" (the ticket's own wording) — revised in review to an invalid
+    *token* instead, specifically to avoid touching `SearchProfilesApi.create()`'s
+    signature (would have needed a nullable `accessToken` to omit the
+    header) for a change whose only purpose was one test; passing a
+    garbage string through the existing `create(accessToken, payload)`
+    signature unchanged proves the same thing (`JwtAuthGuard` actually
+    rejects on this deployed route) via the API client's existing surface.
+    No real user, no `afterAll` — nothing is ever created, matching
+    decision-tree shape (a) from the `e2e-test` skill (`testData` still
+    exists here, revised in review from an initial inline-literal draft —
+    the invalid token and minimal payload moved into
+    `testData/.../rejectsInvalidToken.ts` for consistency with every
+    other spec in this suite, even though shape (a) alone wouldn't have
+    required it).
+  - **`rejectsUnknownField.spec.ts`** — an otherwise-valid body plus one
+    unrecognized top-level field, `criteria` (deliberately reusing root
+    `CLAUDE.md`'s own illustrative example under "`ValidationPipe` in
+    `main.ts`" — "a client still sending `criteria` after the
+    `preferences` rename") → `400` via `ValidationPipe`'s
+    `forbidNonWhitelisted: true`. This is the `POST /search-profiles`
+    "one representative DTO/`ValidationPipe`-boundary case" the
+    golden-middle rule asks for — genuinely un-exercised by
+    `rejectsSecondProfileAtLimit.spec.ts` (a domain-level failure, not a
+    `ValidationPipe` one) and by the two unit-tested domain cases above
+    (neither of which is a `ValidationPipe` rejection either — both pass
+    DTO validation and fail inside the domain layer instead).
+    `payloadWithUnknownField` in `testData/.../rejectsUnknownField.ts` is
+    deliberately *not* typed as `CreateSearchProfilePayload` — the extra
+    `criteria` field is the entire point, and TypeScript's excess-property
+    check only fires on a fresh object literal assigned directly to a
+    typed target, not on a variable passed through a typed parameter, so
+    no cast is needed to get it past `SearchProfilesApi.create()`'s
+    parameter type. Still needs a real logged-in user (`JwtAuthGuard` runs
+    before `ValidationPipe` in Nest's request lifecycle, same ordering
+    note as `setSearchProfileLimit/rejectsInvalidLimit.spec.ts`), so it
+    does get an `afterAll` cleanup — even though no Search Profile is ever
+    actually created.
+  - `httpStatus.UNAUTHORIZED` (401) added — the first spec in this whole
+    suite to assert it. Neither `401` nor this `400` case has a response
+    schema in the live spec (checked via `mcp-openapi-server` first), so
+    both are plain `expect(status).toBe(...)`.
+- `httpStatus.CREATED` (201) and `routes.searchProfiles.create` added.
+  `BackendApi` gained a `.searchProfiles` facade property, same pattern as
+  `.auth`/`.users`.
+- Synthetic `telegramUsername`: `e2e_create_search_profile_${Date.now()}`,
+  following "Synthetic data naming" below — `SearchProfile.name` itself
+  (`'e2e_Backend Prague'`) also picked up the `e2e_`-recognizable-prefix
+  convention that section already anticipated for this ticket, adapted to
+  a `e2e_<Display Name>` shape rather than the fully underscore-joined
+  identifier `telegramUsername` uses.
+
+## GET /search-profiles/:id coverage (added 2026-09-06)
+
+Second `searchProfiles` endpoint against 869er68qq. Own subfolder from the
+start (`specs/searchProfiles/getById/`, Testomat.io suite `8cce3f2d` under
+`searchProfiles`). `SearchProfilesApi.getById(accessToken, id)` added — the
+client method is named `getById`, not `findById`, deliberately not
+matching `SearchProfilesController.findById`'s own handler name: this
+project's own precedent (see "E2E admin identity" above → `getUsers()` was
+renamed from `list()` specifically to describe the endpoint, independent
+of whatever the server's internal handler happens to be called) is "name
+it for what it does," not "mirror the controller" — the `deleteUser()`
+rename lined up with the controller's own name by coincidence, not by
+rule.
+
+`routes.searchProfiles.byId(id)` — not `getById(id)` — is the route
+builder, revised in review once `PATCH /search-profiles/:id` (below)
+needed the exact same path with a different HTTP method: `GET`, `PATCH`,
+and (once written) `DELETE /search-profiles/:id` all resolve to this one
+path, so one shared, verb-agnostic route entry covers all three rather
+than repeating an identical arrow function under `getById`/`update`/
+`deleteById` keys. The HTTP verb lives in `SearchProfilesApi`'s own
+`this.request.get/patch/delete` call, not in the route name — `routes.ts`
+only describes *paths*, which is genuinely one shared thing here, not
+three.
+
+- **`returnsCreatedProfile.spec.ts`** — the one positive case: create a
+  profile, then `GET` it back by id, and assert the `GET` response body
+  `toEqual`s the `POST` response body exactly. Deliberately a single
+  whole-object comparison against the known-good `create` response, not a
+  field-by-field re-assertion of `name`/`preferences`/etc. — the `create`
+  specs already prove those values are correct on creation; this spec's
+  only job is proving a *separate* request against real, persisted
+  Postgres data returns the identical row, which a same-response
+  self-comparison couldn't prove. This is the "read back → matches what
+  was sent" half of the ticket's original combined "create → read back"
+  scenario, split into its own endpoint-scoped spec now that `getById`
+  exists as a first-class tested endpoint.
+- Reuses `SearchProfileResponseSchema` from `schemas/searchProfiles/` —
+  checked live via `mcp-openapi-server` first, `GET /search-profiles/:id`'s
+  `200` schema is byte-for-byte identical to `POST /search-profiles`'s
+  `201` one (same `SearchProfileResponseDto`), so no new schema file was
+  created.
+
+**Negative specs (added 2026-09-06)**, all three of the ticket's named
+scenarios for this endpoint written in one pass:
+
+- **`rejectsNonOwner.spec.ts`** — same shape as
+  `users/deleteUser/rejectsNonOwner.spec.ts`: a real "victim" user's
+  profile, a separate real "attacker" user attempting to read it, `404`
+  not `403` (the enumeration-safe owner-or-admin pattern). Both users need
+  `afterAll` cleanup — the read attempt under test is expected to fail, so
+  neither is removed by it.
+- **`rejectsInvalidId.spec.ts`** and **`rejectsNonexistentId.spec.ts`** —
+  both use `apiHelper.getAdminAccessToken()` rather than a fresh login,
+  same reasoning as `setSearchProfileLimit/rejectsInvalidLimit.spec.ts` /
+  `rejectsNonexistentUser.spec.ts`: this endpoint only requires *some*
+  valid authenticated caller (`JwtAuthGuard` alone, no `AdminGuard`), and
+  since `ParseUUIDPipe` rejects the malformed-id case before ownership is
+  ever checked, and the nonexistent-id case 404s regardless of who's
+  asking, there's no reason to burn a fresh login (and its
+  `perAccount` rate-limit budget) creating a new user neither case
+  actually needs. No `afterAll` for either — nothing is ever created,
+  matching decision-tree shape (a) from the `e2e-test` skill.
+  `rejectsNonexistentId.spec.ts` inlines its random id
+  (`randomUUID()`) directly in the spec body, no `testData` file — a
+  fresh random value every run is the whole point, nothing to name and
+  reuse. `rejectsInvalidId.spec.ts`'s malformed id (`'not-a-uuid'`) moved
+  into `testData/.../rejectsInvalidId.ts` (`malformedId`) instead, for
+  consistency with every other spec in this suite, even though shape (a)
+  alone wouldn't have required it — same revision `rejectsInvalidToken.spec.ts`
+  went through above.
+- All four `getById` specs (one positive, three negative) link to
+  Testomat.io test cases (`@Teb53df87`, `@T0183c1b2`, `@T497475c2`,
+  `@Tcf46f1b6`) in the `getById` suite.
+
+## PATCH /search-profiles/:id coverage (added 2026-09-06)
+
+Third `searchProfiles` endpoint against 869er68qq. Own subfolder from the
+start (`specs/searchProfiles/update/`, Testomat.io suite `59401818` under
+`searchProfiles`). `SearchProfilesApi.update(accessToken, id, payload)`
+added, reusing `routes.searchProfiles.byId(id)` (see "GET
+/search-profiles/:id coverage" above) rather than a second, identical
+route entry — new `api/searchProfiles/interfaces/UpdateSearchProfilePayload.ts`
+(`name?`, `description?: string | null`, `preferences?: SearchPreferencesPayload`,
+mirrors `UpdateSearchProfileDto`'s own optionality exactly, `description`
+included). Response schema reused from `schemas/searchProfiles/` —
+checked live first, `PATCH /search-profiles/:id`'s `200` is the same
+`SearchProfileResponseDto` shape as `POST`/`GET`.
+
+The ticket's positive scenario for this endpoint is one bullet covering
+three genuinely distinct `SearchProfile.updateDetails()` behaviors
+(root `CLAUDE.md` → domain model) — being built as three separate atomic
+specs, one at a time, plus a fourth (updating every field at once) once
+those three land, not as one combined spec:
+
+- **`updatesOnlySentField.spec.ts`** (done) — sends only a new `name` in
+  the `PATCH`; asserts `name` changed to the sent value while
+  `description`/`preferences` deep-equal exactly what `create()` returned
+  — proving `updateDetails()`'s `input.x !== undefined ? ... : this.props.x`
+  guards actually mean "omitted fields survive," not just that the DTO
+  makes them optional. Also asserts `id`/`userId`/`status`/`lastMatchedAt`
+  are byte-for-byte unchanged (a `PATCH` has no business touching any of
+  these) and that `updatedAt` moves strictly forward from the original
+  `createdAt` — even a partial update still counts as a real update,
+  `updateDetails()` unconditionally sets `updatedAt: new Date()`
+  regardless of which fields actually changed. Create payload deliberately
+  sets non-default `description`/`preferences` first, so an accidental
+  blanket-overwrite
+  bug would have something real to clobber.
+- Still to come (tracked here so the ticket's scope doesn't need
+  re-deriving next time): `description: null` explicitly clears it (the
+  asymmetric case root `CLAUDE.md` documents under `SearchProfile.updateDetails()`);
+  a new `preferences` object fully replaces the old one rather than
+  merging (send a `preferences` with different sub-fields set than the
+  original, assert the old ones are gone, not merged in); and a fourth
+  spec updating `name` + `description` + `preferences` all in the same
+  `PATCH` call.
+
 ## Synthetic data naming (added 2026-08-30)
 
 Every login this suite performs creates a real row in the production
