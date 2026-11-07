@@ -1,6 +1,7 @@
 import { UpsertArgs } from './UpsertArgs';
 
 export interface FakePrismaService {
+  $queryRaw: jest.Mock<Promise<unknown>, [TemplateStringsArray, ...unknown[]]>;
   searchProfile: {
     upsert: jest.Mock<Promise<unknown>, [UpsertArgs]>;
     findUnique: jest.Mock<Promise<unknown>, [{ where: { id: string } }]>;

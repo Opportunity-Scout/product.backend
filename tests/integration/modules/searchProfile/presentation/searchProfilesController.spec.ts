@@ -5,6 +5,9 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '@app/AppModule';
 import { configureApp } from '@app/configureApp';
+import { PrismaTransactionContext } from '@app/common/persistence/PrismaTransactionContext';
+import { SEARCH_PROFILE_REPOSITORY } from '@app/modules/searchProfile/application/ports/SearchProfileRepository';
+import { DelayedSearchProfileAdapter } from '../../../helpers/delayedSearchProfileAdapterHelper';
 import { loginAsNewUser } from '../../../helpers/loginAsNewUserHelper';
 import { promoteToAdmin } from '../../../helpers/promoteToAdminHelper';
 
@@ -80,6 +83,48 @@ describe('SearchProfilesController (integration)', () => {
       expect(persisted).not.toBeNull();
       expect(persisted?.userId).toBe(userId);
       expect(persisted?.name).toBe(payload.name);
+    });
+
+    describe('with a widened race window', () => {
+      let raceApp: NestExpressApplication;
+
+      beforeAll(async () => {
+        const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+          .overrideProvider(SEARCH_PROFILE_REPOSITORY)
+          .useFactory({
+            factory: (prisma: PrismaTransactionContext) => new DelayedSearchProfileAdapter(prisma),
+            inject: [PrismaTransactionContext],
+          })
+          .compile();
+
+        raceApp = moduleRef.createNestApplication<NestExpressApplication>();
+        configureApp(raceApp);
+        // A listening server stops supertest from closing it per request, which resets concurrent requests.
+        await raceApp.listen(0);
+      });
+
+      afterAll(async () => {
+        await raceApp.close();
+      });
+
+      it('queues concurrent creates on the user row lock so only one passes the free-tier limit', async () => {
+        const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
+        const { token, userId } = await loginAsNewUser(raceApp, verificationClient);
+        createdUserIds.push(userId);
+        const sendRequest = () =>
+          request(raceApp.getHttpServer())
+            .post('/search-profiles')
+            .set('Authorization', `Bearer ${token}`)
+            .send(payload);
+
+        const responses = await Promise.all(Array.from({ length: 5 }, () => sendRequest()));
+        const statuses = responses.map((response) => response.status).sort();
+        const persisted = await verificationClient.searchProfile.findMany({ where: { userId } });
+        createdSearchProfileIds.push(...persisted.map((profile) => profile.id));
+
+        expect(persisted).toHaveLength(1);
+        expect(statuses).toEqual([201, 400, 400, 400, 400]);
+      });
     });
   });
 

@@ -3,6 +3,7 @@ import { UserAccessService } from '@app/modules/user/application/UserAccessServi
 import { UserNotFoundError } from '@app/modules/user/application/errors/UserNotFoundError';
 import { FakeUserRepository } from '../../../../helpers/fakeUserRepositoryHelper';
 import { FakeSearchProfileRepository } from '../../../../helpers/fakeSearchProfileRepositoryHelper';
+import { FakeUnitOfWork } from '../../../../helpers/fakeUnitOfWorkHelper';
 import { buildUser } from '../../../../helpers/buildUserHelper';
 import { buildSearchProfile } from '../../../../helpers/buildSearchProfileHelper';
 
@@ -10,6 +11,7 @@ describe('DeleteUserUseCase', () => {
   it('deletes the user and all of their search profiles', async () => {
     const userRepository = new FakeUserRepository();
     const searchProfileRepository = new FakeSearchProfileRepository();
+    const unitOfWork = new FakeUnitOfWork();
     const user = buildUser();
     const otherUser = buildUser({ id: 'other-user' });
     userRepository.saved.push(user, otherUser);
@@ -23,6 +25,7 @@ describe('DeleteUserUseCase', () => {
       userRepository,
       searchProfileRepository,
       new UserAccessService(userRepository),
+      unitOfWork,
     );
 
     const result = await useCase.execute({ id: user.id, callerId: user.id });
@@ -32,6 +35,7 @@ describe('DeleteUserUseCase', () => {
     expect(await userRepository.findById(user.id)).toBeNull();
     expect(remainingProfiles).toEqual([]);
     expect(await searchProfileRepository.findAllByUserId(otherUser.id)).toHaveLength(1);
+    expect(unitOfWork.runCount).toBe(1);
   });
 
   it('fails when no user exists for the given id', async () => {
@@ -42,6 +46,7 @@ describe('DeleteUserUseCase', () => {
       userRepository,
       searchProfileRepository,
       new UserAccessService(userRepository),
+      new FakeUnitOfWork(),
     );
 
     const result = await useCase.execute({ id: 'missing-id', callerId: 'missing-id' });
@@ -60,6 +65,7 @@ describe('DeleteUserUseCase', () => {
       userRepository,
       searchProfileRepository,
       new UserAccessService(userRepository),
+      new FakeUnitOfWork(),
     );
 
     const result = await useCase.execute({ id: user.id, callerId: 'someone-else' });
@@ -80,6 +86,7 @@ describe('DeleteUserUseCase', () => {
       userRepository,
       searchProfileRepository,
       new UserAccessService(userRepository),
+      new FakeUnitOfWork(),
     );
 
     const result = await useCase.execute({ id: user.id, callerId: otherUser.id });
@@ -101,6 +108,7 @@ describe('DeleteUserUseCase', () => {
       userRepository,
       searchProfileRepository,
       new UserAccessService(userRepository),
+      new FakeUnitOfWork(),
     );
 
     const result = await useCase.execute({ id: user.id, callerId: admin.id });

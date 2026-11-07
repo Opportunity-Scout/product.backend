@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Result } from '@app/common/kernel/Result';
+import { UNIT_OF_WORK, UnitOfWork } from '@app/common/unitOfWork/UnitOfWork';
 import {
   SEARCH_PROFILE_REPOSITORY,
   SearchProfileRepository,
@@ -17,26 +18,29 @@ export class DeleteUserUseCase {
     @Inject(SEARCH_PROFILE_REPOSITORY)
     private readonly searchProfileRepository: SearchProfileRepository,
     private readonly userAccessService: UserAccessService,
+    @Inject(UNIT_OF_WORK)
+    private readonly unitOfWork: UnitOfWork,
   ) {}
 
   async execute(input: DeleteUserInput): Promise<Result<void, UserNotFoundError>> {
-    const user = await this.userRepository.findById(input.id);
+    return this.unitOfWork.run(async (): Promise<Result<void, UserNotFoundError>> => {
+      // Locks the user row so a concurrent profile create waits instead of leaving an orphan profile.
+      const user = await this.userRepository.findByIdForUpdate(input.id);
 
-    if (!user) {
-      return Result.fail(new UserNotFoundError(input.id));
-    }
+      if (!user) {
+        return Result.fail(new UserNotFoundError(input.id));
+      }
 
-    // Same 404 as a nonexistent id either way — a non-owning, non-admin
-    // caller can't tell "not yours" from "doesn't exist".
-    if (!(await this.userAccessService.isOwnerOrAdmin(user.id, input.callerId))) {
-      return Result.fail(new UserNotFoundError(input.id));
-    }
+      // Same 404 as a nonexistent id either way — a non-owning, non-admin
+      // caller can't tell "not yours" from "doesn't exist".
+      if (!(await this.userAccessService.isOwnerOrAdmin(user.id, input.callerId))) {
+        return Result.fail(new UserNotFoundError(input.id));
+      }
 
-    // Profiles first, deliberately not transactional — see CLAUDE.md
-    // "Self-service account deletion" for the crash-vs-race tradeoff behind the order.
-    await this.searchProfileRepository.deleteAllByUserId(user.id);
-    await this.userRepository.deleteById(user.id);
+      await this.searchProfileRepository.deleteAllByUserId(user.id);
+      await this.userRepository.deleteById(user.id);
 
-    return Result.ok(undefined);
+      return Result.ok(undefined);
+    });
   }
 }

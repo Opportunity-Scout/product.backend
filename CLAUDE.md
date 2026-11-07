@@ -77,6 +77,10 @@ PostgreSQL via Docker + Prisma are wired up (see "Persistence" below). Redis/Bul
   whether it's "owned by exactly one class" today and might need moving
   later.
 - Exception: `main.ts` stays lowercase — it's a bootstrap script, not a class.
+- **Code comments:** write one only when the *why* can't be read from the
+  code itself (e.g. the reason lives in another file). Keep it to one line
+  where possible, and self-contained — it must make sense on its own, no
+  "Same as above" or other references to neighboring comments.
 - HTTP route paths stay kebab-case (`@Controller('search-profiles')`) — that's a
   URL convention, unrelated to file/identifier naming.
 
@@ -286,7 +290,7 @@ VPS) sit in a plaintext file — no encryption at rest, no access audit, no
 rotation. Discussed explicitly: this is standard practice for a solo
 operator with no second person holding server access and no real
 paying-customer data yet, same "no infra before it's actually needed"
-reasoning as Redis/BullMQ and the Unit-of-Work gap above — not an oversight.
+reasoning as Redis/BullMQ — not an oversight.
 The considered alternative is SOPS + age (secrets encrypted with one key,
 the encrypted file committed to git for a real change history, decrypted
 with a single CLI call at deploy) over Vault or a cloud secret manager,
@@ -480,6 +484,36 @@ can't silently mix incompatible migration SQL — same spirit as
 bundle landing in the repo unasked is exactly the kind of thing the Security
 section says to flag rather than silently keep. Removed by choice: rely on the
 assistant's own knowledge instead of vendoring ~2200 lines of docs into the repo.
+
+**Unit of Work (2026-11-07).** `UnitOfWork` (`common/unitOfWork/UnitOfWork.ts`)
+is the port a use case wraps work in to run it as one transaction:
+`this.unitOfWork.run(async () => { ... })`. `PrismaUnitOfWorkAdapter` opens
+`prisma.$transaction()` and stores its transaction client in
+`PrismaTransactionContext` via Node's `AsyncLocalStorage`, so repository
+signatures stay unchanged. Rules:
+- **Every Prisma adapter queries through `this.db.client`** (field typed
+  `PrismaTransactionContext`), never `PrismaService` directly — an adapter
+  that skips `.client` silently runs outside the transaction.
+- Rollback happens only on a **throw**. A `Result.fail` returned normally
+  commits whatever was written before it, so keep all checks before writes.
+- A nested `run()` joins the outer transaction instead of opening a new one.
+- Row locks: `UserRepository.findByIdForUpdate()` runs `SELECT ... FOR UPDATE`
+  via a `$queryRaw` tagged template. It must be `await`ed — Prisma queries are
+  lazy and never reach the database otherwise. It throws when called outside
+  `run()`: in autocommit the lock is released as soon as the statement ends,
+  so the call would look protected without being protected.
+- Unit tests use `FakeUnitOfWork` (`tests/unit/helpers/`), which just runs the
+  work.
+- Prisma's interactive-transaction defaults apply (~2 s to get a connection,
+  5 s per transaction): many requests queued on one row lock could time out.
+  Not a concern for user-driven traffic; revisit if automated writes (DOU)
+  start contending on the same rows.
+- A request waiting on a row lock holds a `pg` pool connection the whole time
+  (pool max = 10, `PrismaService` doesn't override it). 10+ concurrent writes
+  queued on one user's row would drain the pool for the whole service, and
+  every other request would hit the ~2 s connection timeout. The throttler
+  (60 req/min per IP) softens this today; revisit together with the point
+  above when DOU arrives.
 
 ## Architectural priority
 
@@ -1065,6 +1099,17 @@ found — flagged in review, discussed, and explicitly scheduled instead:
 **Roadmap step 5**, after E2E tests and before DOU, so it lands before DOU
 brings real (possibly automated/bursty) write traffic into the picture.
 
+**Closed (2026-11-07):** `CreateSearchProfileUseCase` now runs inside
+`UnitOfWork` and reads the user with `findByIdForUpdate()`, so concurrent
+creates for the same user queue on that row lock and each one sees the
+previous one's insert (see "Persistence" → Unit of Work). Plain concurrent
+requests can't reproduce the race on localhost (the window is a few ms), so
+the proving test (`searchProfilesController.spec.ts` → "with a widened race
+window") overrides `SEARCH_PROFILE_REPOSITORY` with
+`DelayedSearchProfileAdapter`, which sleeps 200 ms after the limit check's
+read. Verified against a false positive: with `FOR UPDATE` removed, the test
+fails with 5 profiles instead of 1.
+
 **Admin override mechanism (decided + implemented 2026-08-07):** `User`
 gained a `role: 'user' | 'admin'` field (`@default(user)`). A new
 `AdminGuard` (`modules/user/presentation/AdminGuard.ts`) checks the live
@@ -1183,6 +1228,18 @@ other users' data, just an unreachable row) and closing it properly needs
 the same Unit-of-Work primitive **Roadmap step 5** already schedules — one
 real transaction would fix both gaps at once, so there's no reason to
 build a narrower, one-off fix for this specific case first.
+
+**Closed (2026-11-07):** `DeleteUserUseCase` now runs inside `UnitOfWork`
+and locks the user row with `findByIdForUpdate()` — the same row
+`CreateSearchProfileUseCase` locks. A crash mid-deletion rolls back both
+deletes, and a concurrent create waits for the deletion to commit, then
+finds no user instead of inserting an orphan. The order of the two deletes
+no longer matters. The rollback is proven by `usersController.spec.ts` →
+"when deleting the user row fails": `FailingDeleteUserAdapter` throws from
+`deleteById()` after the profiles are deleted, and the test asserts both the
+user and the profile still exist. Verified against a false positive: with
+`UnitOfWork.run()` bypassing the transaction, the profile is gone and the
+test fails.
 
 Motivated by two things at once, not built solely for either: a genuine
 self-service data-deletion feature, and the prerequisite the e2e-testing
@@ -1515,7 +1572,8 @@ backlog:
      step was waiting on. **Wired into the e2e suite itself (2026-08-27):**
      `login.spec.ts`'s `test.afterAll` now calls it directly against the
      deployed API — no orphan `User` rows left behind by a run.
-5. **Add a real Unit-of-Work port**, closing two known gaps at once with
+5. **Add a real Unit-of-Work port** — **done (2026-11-07)**, see
+   "Persistence" → Unit of Work. Closing two known gaps at once with
    the same primitive — a Postgres transaction (with a row lock on the
    `User` where relevant) threaded across repository calls that are
    currently separate and unsynchronized:

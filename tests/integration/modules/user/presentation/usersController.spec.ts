@@ -6,6 +6,9 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { AppModule } from '@app/AppModule';
 import { configureApp } from '@app/configureApp';
+import { PrismaTransactionContext } from '@app/common/persistence/PrismaTransactionContext';
+import { USER_REPOSITORY } from '@app/modules/user/application/ports/UserRepository';
+import { FailingDeleteUserAdapter } from '../../../helpers/failingDeleteUserAdapterHelper';
 import { loginAsNewUser } from '../../../helpers/loginAsNewUserHelper';
 import { promoteToAdmin } from '../../../helpers/promoteToAdminHelper';
 
@@ -211,6 +214,52 @@ describe('UsersController (integration)', () => {
 
       expect(response.status).toBe(204);
       expect(await verificationClient.user.findUnique({ where: { id: targetId } })).toBeNull();
+    });
+
+    describe('when deleting the user row fails', () => {
+      let failingApp: NestExpressApplication;
+
+      beforeAll(async () => {
+        const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+          .overrideProvider(USER_REPOSITORY)
+          .useFactory({
+            factory: (prisma: PrismaTransactionContext) => new FailingDeleteUserAdapter(prisma),
+            inject: [PrismaTransactionContext],
+          })
+          .compile();
+
+        failingApp = moduleRef.createNestApplication<NestExpressApplication>();
+        configureApp(failingApp);
+        await failingApp.init();
+      });
+
+      afterAll(async () => {
+        await failingApp.close();
+      });
+
+      it('rolls back the already-deleted search profiles, leaving the account intact', async () => {
+        const { token, userId } = await loginAsNewUser(failingApp, verificationClient);
+        createdUserIds.push(userId);
+
+        const createProfileResponse = await request(failingApp.getHttpServer())
+          .post('/search-profiles')
+          .set('Authorization', authHeader(token))
+          .send({ name: 'Backend Prague', preferences: { location: { remote: true } } });
+
+        const profileId = (createProfileResponse.body as { id: string }).id;
+
+        const response = await request(failingApp.getHttpServer())
+          .delete(`/users/${userId}`)
+          .set('Authorization', authHeader(token));
+
+        const user = await verificationClient.user.findUnique({ where: { id: userId } });
+        const profile = await verificationClient.searchProfile.findUnique({ where: { id: profileId } });
+        await verificationClient.searchProfile.deleteMany({ where: { userId } });
+
+        expect(response.status).toBe(500);
+        expect(user).not.toBeNull();
+        expect(profile).not.toBeNull();
+      });
     });
   });
 });

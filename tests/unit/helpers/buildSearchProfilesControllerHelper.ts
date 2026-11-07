@@ -1,3 +1,4 @@
+import { UnitOfWork } from '@app/common/unitOfWork/UnitOfWork';
 import { SearchProfilesController } from '@app/modules/searchProfile/presentation/SearchProfilesController';
 import { CreateSearchProfileUseCase } from '@app/modules/searchProfile/application/createSearchProfile/CreateSearchProfileUseCase';
 import { GetSearchProfileUseCase } from '@app/modules/searchProfile/application/getSearchProfile/GetSearchProfileUseCase';
@@ -13,6 +14,7 @@ import { UserAccessService } from '@app/modules/user/application/UserAccessServi
 import { UserRepository } from '@app/modules/user/application/ports/UserRepository';
 import { FakeSearchProfileRepository } from './fakeSearchProfileRepositoryHelper';
 import { FakeUserRepository } from './fakeUserRepositoryHelper';
+import { FakeUnitOfWork } from './fakeUnitOfWorkHelper';
 import { buildUser } from './buildUserHelper';
 
 function buildDefaultUserRepository(): FakeUserRepository {
@@ -25,11 +27,12 @@ function buildDefaultUserRepository(): FakeUserRepository {
 export function buildSearchProfilesController(
   repository: SearchProfileRepository = new FakeSearchProfileRepository(),
   userRepository: UserRepository = buildDefaultUserRepository(),
+  unitOfWork: UnitOfWork = new FakeUnitOfWork(),
 ): SearchProfilesController {
   const userAccessService = new UserAccessService(userRepository);
 
   return new SearchProfilesController(
-    new CreateSearchProfileUseCase(repository, userRepository),
+    new CreateSearchProfileUseCase(repository, userRepository, unitOfWork),
     new GetSearchProfileUseCase(repository, userAccessService),
     new ListSearchProfilesUseCase(repository),
     new ListSearchProfilesAdminUseCase(repository),

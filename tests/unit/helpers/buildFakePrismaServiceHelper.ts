@@ -2,6 +2,7 @@ import { FakePrismaService, UpsertArgs } from '../interfaces';
 
 export function buildFakePrismaService(): FakePrismaService {
   return {
+    $queryRaw: jest.fn<Promise<unknown>, [TemplateStringsArray, ...unknown[]]>().mockResolvedValue([]),
     searchProfile: {
       upsert: jest.fn<Promise<unknown>, [UpsertArgs]>(),
       findUnique: jest.fn<Promise<unknown>, [{ where: { id: string } }]>(),
