@@ -1,13 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { PrismaUserAdapter } from '@app/modules/user/infrastructure/persistence/PrismaUserAdapter';
 import { PrismaService } from '@app/common/persistence/PrismaService';
+import { PrismaTransactionContext } from '@app/common/persistence/PrismaTransactionContext';
 import { buildUser } from '../../../../helpers/buildUserHelper';
 import { buildFakePrismaService } from '../../../../helpers/buildFakePrismaServiceHelper';
 
 describe('PrismaUserAdapter', () => {
   it('upserts by id, sending a full row to create and a partial row (no id/createdAt) to update', async () => {
     const fakePrisma = buildFakePrismaService();
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     const user = buildUser();
 
     await adapter.save(user);
@@ -30,7 +31,7 @@ describe('PrismaUserAdapter', () => {
   it('returns null when no row exists for the given id', async () => {
     const fakePrisma = buildFakePrismaService();
     fakePrisma.user.findUnique.mockResolvedValue(null);
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     const found = await adapter.findById('missing-id');
 
     expect(found).toBeNull();
@@ -50,7 +51,7 @@ describe('PrismaUserAdapter', () => {
       updatedAt: now,
     });
 
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     const found = await adapter.findById('existing-id');
 
     expect(found?.id).toBe('existing-id');
@@ -63,7 +64,7 @@ describe('PrismaUserAdapter', () => {
   it('returns null when no row exists for the given telegram id', async () => {
     const fakePrisma = buildFakePrismaService();
     fakePrisma.user.findUnique.mockResolvedValue(null);
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     const found = await adapter.findByTelegramUserId('missing-telegram-id');
 
     expect(found).toBeNull();
@@ -83,7 +84,7 @@ describe('PrismaUserAdapter', () => {
       updatedAt: now,
     });
 
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     const found = await adapter.findByTelegramUserId('12345');
     const call = fakePrisma.user.findUnique.mock.calls[0][0];
 
@@ -109,7 +110,7 @@ describe('PrismaUserAdapter', () => {
     ]);
     fakePrisma.user.count.mockResolvedValue(1);
 
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     const result = await adapter.findMany({ limit: 20, offset: 0 });
     const findManyCall = fakePrisma.user.findMany.mock.calls[0][0];
 
@@ -122,7 +123,7 @@ describe('PrismaUserAdapter', () => {
 
   it('filters by a case-insensitive telegramUsername search term', async () => {
     const fakePrisma = buildFakePrismaService();
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     await adapter.findMany({ telegramUsername: 'oleh', limit: 20, offset: 0 });
     const findManyCall = fakePrisma.user.findMany.mock.calls[0][0];
     const countCall = fakePrisma.user.count.mock.calls[0][0];
@@ -133,7 +134,7 @@ describe('PrismaUserAdapter', () => {
 
   it('deletes the row by id', async () => {
     const fakePrisma = buildFakePrismaService();
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
     await adapter.deleteById('user-1');
 
     expect(fakePrisma.user.delete).toHaveBeenCalledWith({ where: { id: 'user-1' } });
@@ -146,7 +147,7 @@ describe('PrismaUserAdapter', () => {
       new Prisma.PrismaClientKnownRequestError('No record found', { code: 'P2025', clientVersion: 'test' }),
     );
 
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
 
     await expect(adapter.deleteById('user-1')).resolves.toBeUndefined();
   });
@@ -158,7 +159,7 @@ describe('PrismaUserAdapter', () => {
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
     );
 
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
 
     await expect(adapter.deleteById('user-1')).rejects.toThrow('Unique constraint failed');
   });
@@ -166,8 +167,36 @@ describe('PrismaUserAdapter', () => {
   it('rethrows a non-Prisma error', async () => {
     const fakePrisma = buildFakePrismaService();
     fakePrisma.user.delete.mockRejectedValue(new Error('connection lost'));
-    const adapter = new PrismaUserAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
 
     await expect(adapter.deleteById('user-1')).rejects.toThrow('connection lost');
+  });
+
+  it('refuses to run findByIdForUpdate outside a transaction, without querying', async () => {
+    const fakePrisma = buildFakePrismaService();
+    const adapter = new PrismaUserAdapter(new PrismaTransactionContext(fakePrisma as unknown as PrismaService));
+
+    await expect(adapter.findByIdForUpdate('user-1')).rejects.toThrow('must run inside UnitOfWork.run()');
+    expect(fakePrisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('locks the row with SELECT ... FOR UPDATE on the transaction client before reading it', async () => {
+    const fakePrisma = buildFakePrismaService();
+    const fakeTransaction = buildFakePrismaService();
+    fakeTransaction.user.findUnique.mockResolvedValue(null);
+    const transactionContext = new PrismaTransactionContext(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaUserAdapter(transactionContext);
+
+    await transactionContext.runWith(fakeTransaction as unknown as Prisma.TransactionClient, () =>
+      adapter.findByIdForUpdate('user-1'),
+    );
+
+    const [sqlParts, ...values] = fakeTransaction.$queryRaw.mock.calls[0];
+
+    expect(fakeTransaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(sqlParts.join('?')).toContain('FOR UPDATE');
+    expect(values).toEqual(['user-1']);
+    expect(fakeTransaction.user.findUnique).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+    expect(fakePrisma.$queryRaw).not.toHaveBeenCalled();
   });
 });

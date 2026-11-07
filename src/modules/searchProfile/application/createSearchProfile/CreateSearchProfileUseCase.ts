@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Result } from '@app/common/kernel/Result';
 import { DomainError } from '@app/common/kernel/DomainError';
+import { UNIT_OF_WORK, UnitOfWork } from '@app/common/unitOfWork/UnitOfWork';
 import { USER_REPOSITORY, UserRepository } from '@app/modules/user/application/ports/UserRepository';
 import { UserNotFoundError } from '@app/modules/user/application/errors/UserNotFoundError';
 import { SearchPreferences } from '../../domain/SearchPreferences';
@@ -16,43 +17,47 @@ export class CreateSearchProfileUseCase {
     private readonly searchProfileRepository: SearchProfileRepository,
     @Inject(USER_REPOSITORY)
     private readonly userRepository: UserRepository,
+    @Inject(UNIT_OF_WORK)
+    private readonly unitOfWork: UnitOfWork,
   ) {}
 
   async execute(input: CreateSearchProfileInput): Promise<Result<SearchProfile, DomainError>> {
-    const user = await this.userRepository.findById(input.userId);
+    return this.unitOfWork.run(async (): Promise<Result<SearchProfile, DomainError>> => {
+      const user = await this.userRepository.findByIdForUpdate(input.userId);
 
-    if (!user) {
-      return Result.fail(new UserNotFoundError(input.userId));
-    }
+      if (!user) {
+        return Result.fail(new UserNotFoundError(input.userId));
+      }
 
-    const existingProfiles = await this.searchProfileRepository.findAllByUserId(input.userId);
-    const activeOrPausedCount = existingProfiles.filter(
-      (profile) => profile.status === 'active' || profile.status === 'paused',
-    ).length;
+      const existingProfiles = await this.searchProfileRepository.findAllByUserId(input.userId);
+      const activeOrPausedCount = existingProfiles.filter(
+        (profile) => profile.status === 'active' || profile.status === 'paused',
+      ).length;
 
-    if (activeOrPausedCount >= user.searchProfileLimit) {
-      return Result.fail(new SearchProfileLimitExceededError(input.userId, user.searchProfileLimit));
-    }
+      if (activeOrPausedCount >= user.searchProfileLimit) {
+        return Result.fail(new SearchProfileLimitExceededError(input.userId, user.searchProfileLimit));
+      }
 
-    const preferencesResult = SearchPreferences.create(input.preferences);
+      const preferencesResult = SearchPreferences.create(input.preferences);
 
-    if (preferencesResult.isFailure) {
-      return Result.fail(preferencesResult.error);
-    }
+      if (preferencesResult.isFailure) {
+        return Result.fail(preferencesResult.error);
+      }
 
-    const searchProfileResult = SearchProfile.create({
-      userId: input.userId,
-      name: input.name,
-      description: input.description,
-      preferences: preferencesResult.value,
+      const searchProfileResult = SearchProfile.create({
+        userId: input.userId,
+        name: input.name,
+        description: input.description,
+        preferences: preferencesResult.value,
+      });
+
+      if (searchProfileResult.isFailure) {
+        return Result.fail(searchProfileResult.error);
+      }
+
+      await this.searchProfileRepository.save(searchProfileResult.value);
+
+      return Result.ok(searchProfileResult.value);
     });
-
-    if (searchProfileResult.isFailure) {
-      return Result.fail(searchProfileResult.error);
-    }
-
-    await this.searchProfileRepository.save(searchProfileResult.value);
-
-    return Result.ok(searchProfileResult.value);
   }
 }

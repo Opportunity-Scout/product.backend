@@ -22,6 +22,10 @@ export class FakeUserRepository implements UserRepository {
     return Promise.resolve(this.saved.find((user) => user.id === id) ?? null);
   }
 
+  findByIdForUpdate(id: string): Promise<User | null> {
+    return Promise.resolve(this.saved.find((user) => user.id === id) ?? null);
+  }
+
   findByTelegramUserId(telegramUserId: string): Promise<User | null> {
     return Promise.resolve(this.saved.find((user) => user.telegramUserId === telegramUserId) ?? null);
   }

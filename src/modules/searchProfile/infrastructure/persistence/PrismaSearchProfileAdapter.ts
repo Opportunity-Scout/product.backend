@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '@app/common/persistence/PrismaService';
+import { PrismaTransactionContext } from '@app/common/persistence/PrismaTransactionContext';
 import { SearchProfile } from '../../domain/SearchProfile';
 import { SearchProfileRepository } from '../../application/ports/SearchProfileRepository';
 import { FindManySearchProfilesParams } from '../../application/ports/interfaces/FindManySearchProfilesParams';
@@ -9,12 +9,12 @@ import { prismaSearchProfileMapper } from './helpers/prismaSearchProfileMapperHe
 
 @Injectable()
 export class PrismaSearchProfileAdapter implements SearchProfileRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly db: PrismaTransactionContext) {}
 
   async save(searchProfile: SearchProfile): Promise<void> {
     const preferences = prismaSearchProfileMapper.toPersistenceJson(searchProfile.preferences);
 
-    await this.prisma.searchProfile.upsert({
+    await this.db.client.searchProfile.upsert({
       where: { id: searchProfile.id },
       create: {
         id: searchProfile.id,
@@ -40,20 +40,20 @@ export class PrismaSearchProfileAdapter implements SearchProfileRepository {
   }
 
   async findById(id: string): Promise<SearchProfile | null> {
-    const row = await this.prisma.searchProfile.findUnique({ where: { id } });
+    const row = await this.db.client.searchProfile.findUnique({ where: { id } });
 
     return row ? prismaSearchProfileMapper.toDomain(row) : null;
   }
 
   async findAllByUserId(userId: string): Promise<SearchProfile[]> {
-    const rows = await this.prisma.searchProfile.findMany({ where: { userId } });
+    const rows = await this.db.client.searchProfile.findMany({ where: { userId } });
 
     return rows.map((row) => prismaSearchProfileMapper.toDomain(row));
   }
 
   async deleteById(id: string): Promise<void> {
     try {
-      await this.prisma.searchProfile.delete({ where: { id } });
+      await this.db.client.searchProfile.delete({ where: { id } });
     } catch (error) {
       // P2025 = no row matched — a concurrent delete already removed it between
       // the use case's findById() and this call. The caller's intent (the row
@@ -66,20 +66,20 @@ export class PrismaSearchProfileAdapter implements SearchProfileRepository {
   }
 
   async deleteAllByUserId(userId: string): Promise<void> {
-    await this.prisma.searchProfile.deleteMany({ where: { userId } });
+    await this.db.client.searchProfile.deleteMany({ where: { userId } });
   }
 
   async findMany(params: FindManySearchProfilesParams): Promise<FindManySearchProfilesResult> {
     const where: Prisma.SearchProfileWhereInput = params.userId ? { userId: params.userId } : {};
 
     const [rows, total] = await Promise.all([
-      this.prisma.searchProfile.findMany({
+      this.db.client.searchProfile.findMany({
         where,
         take: params.limit,
         skip: params.offset,
         orderBy: { createdAt: 'desc' },
       }),
-      this.prisma.searchProfile.count({ where }),
+      this.db.client.searchProfile.count({ where }),
     ]);
 
     return { searchProfiles: rows.map((row) => prismaSearchProfileMapper.toDomain(row)), total };

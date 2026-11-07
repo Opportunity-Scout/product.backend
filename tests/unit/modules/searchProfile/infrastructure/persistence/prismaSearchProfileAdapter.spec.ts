@@ -1,13 +1,16 @@
 import { Prisma } from '@prisma/client';
 import { PrismaSearchProfileAdapter } from '@app/modules/searchProfile/infrastructure/persistence/PrismaSearchProfileAdapter';
 import { PrismaService } from '@app/common/persistence/PrismaService';
+import { PrismaTransactionContext } from '@app/common/persistence/PrismaTransactionContext';
 import { buildSearchProfile } from '../../../../helpers/buildSearchProfileHelper';
 import { buildFakePrismaService } from '../../../../helpers/buildFakePrismaServiceHelper';
 
 describe('PrismaSearchProfileAdapter', () => {
   it('upserts by id, sending a full row to create and a partial row (no id/createdAt) to update', async () => {
     const fakePrisma = buildFakePrismaService();
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     const profile = buildSearchProfile();
     await adapter.save(profile);
     const call = fakePrisma.searchProfile.upsert.mock.calls[0][0];
@@ -23,7 +26,9 @@ describe('PrismaSearchProfileAdapter', () => {
   it('returns null when no row exists for the given id', async () => {
     const fakePrisma = buildFakePrismaService();
     fakePrisma.searchProfile.findUnique.mockResolvedValue(null);
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     const found = await adapter.findById('missing-id');
 
     expect(found).toBeNull();
@@ -45,7 +50,9 @@ describe('PrismaSearchProfileAdapter', () => {
       lastMatchedAt: null,
     });
 
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     const found = await adapter.findById('existing-id');
 
     expect(found?.id).toBe('existing-id');
@@ -68,7 +75,9 @@ describe('PrismaSearchProfileAdapter', () => {
       lastMatchedAt: null,
     });
 
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
 
     await expect(adapter.findById('corrupted-id')).rejects.toThrow();
   });
@@ -102,7 +111,9 @@ describe('PrismaSearchProfileAdapter', () => {
       },
     ]);
 
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     const found = await adapter.findAllByUserId('user-1');
     const call = fakePrisma.searchProfile.findMany.mock.calls[0][0];
 
@@ -115,7 +126,9 @@ describe('PrismaSearchProfileAdapter', () => {
   it('returns an empty array when the user has no search profiles', async () => {
     const fakePrisma = buildFakePrismaService();
     fakePrisma.searchProfile.findMany.mockResolvedValue([]);
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     const found = await adapter.findAllByUserId('user-without-profiles');
 
     expect(found).toEqual([]);
@@ -124,7 +137,9 @@ describe('PrismaSearchProfileAdapter', () => {
   it('queries with an empty where clause and paginates when no userId filter is given', async () => {
     const fakePrisma = buildFakePrismaService();
     fakePrisma.searchProfile.count.mockResolvedValue(5);
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     const result = await adapter.findMany({ limit: 20, offset: 0 });
     const findManyCall = fakePrisma.searchProfile.findMany.mock.calls[0][0];
 
@@ -136,7 +151,9 @@ describe('PrismaSearchProfileAdapter', () => {
 
   it('filters by userId when given', async () => {
     const fakePrisma = buildFakePrismaService();
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     await adapter.findMany({ userId: 'user-1', limit: 20, offset: 0 });
     const findManyCall = fakePrisma.searchProfile.findMany.mock.calls[0][0];
     const countCall = fakePrisma.searchProfile.count.mock.calls[0][0];
@@ -147,7 +164,9 @@ describe('PrismaSearchProfileAdapter', () => {
 
   it('deletes the row by id', async () => {
     const fakePrisma = buildFakePrismaService();
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
     await adapter.deleteById('profile-1');
 
     expect(fakePrisma.searchProfile.delete).toHaveBeenCalledWith({ where: { id: 'profile-1' } });
@@ -160,7 +179,9 @@ describe('PrismaSearchProfileAdapter', () => {
       new Prisma.PrismaClientKnownRequestError('No record found', { code: 'P2025', clientVersion: 'test' }),
     );
 
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
 
     await expect(adapter.deleteById('profile-1')).resolves.toBeUndefined();
   });
@@ -171,7 +192,9 @@ describe('PrismaSearchProfileAdapter', () => {
     fakePrisma.searchProfile.delete.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' }),
     );
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
 
     await expect(adapter.deleteById('profile-1')).rejects.toThrow('Unique constraint failed');
   });
@@ -179,7 +202,9 @@ describe('PrismaSearchProfileAdapter', () => {
   it('rethrows a non-Prisma error', async () => {
     const fakePrisma = buildFakePrismaService();
     fakePrisma.searchProfile.delete.mockRejectedValue(new Error('connection lost'));
-    const adapter = new PrismaSearchProfileAdapter(fakePrisma as unknown as PrismaService);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
 
     await expect(adapter.deleteById('profile-1')).rejects.toThrow('connection lost');
   });

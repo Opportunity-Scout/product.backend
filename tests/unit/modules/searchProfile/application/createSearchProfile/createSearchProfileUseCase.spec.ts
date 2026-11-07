@@ -3,6 +3,7 @@ import { SearchProfileLimitExceededError } from '@app/modules/searchProfile/appl
 import { UserNotFoundError } from '@app/modules/user/application/errors/UserNotFoundError';
 import { FakeSearchProfileRepository } from '../../../../helpers/fakeSearchProfileRepositoryHelper';
 import { FakeUserRepository } from '../../../../helpers/fakeUserRepositoryHelper';
+import { FakeUnitOfWork } from '../../../../helpers/fakeUnitOfWorkHelper';
 import { buildUser } from '../../../../helpers/buildUserHelper';
 import { buildSearchProfile } from '../../../../helpers/buildSearchProfileHelper';
 
@@ -10,8 +11,9 @@ describe('CreateSearchProfileUseCase', () => {
   it('creates and persists a search profile', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
+    const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1' }));
-    const useCase = new CreateSearchProfileUseCase(repository, userRepository);
+    const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
       userId: 'user-1',
@@ -22,13 +24,15 @@ describe('CreateSearchProfileUseCase', () => {
     expect(result.isSuccess).toBe(true);
     expect(repository.saved).toHaveLength(1);
     expect(repository.saved[0].name).toBe('Senior QA Europe');
+    expect(unitOfWork.runCount).toBe(1);
   });
 
   it('fails without persisting when preferences are invalid', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
+    const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1' }));
-    const useCase = new CreateSearchProfileUseCase(repository, userRepository);
+    const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
       userId: 'user-1',
@@ -43,8 +47,9 @@ describe('CreateSearchProfileUseCase', () => {
   it('fails without persisting when the name is blank, even with valid preferences', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
+    const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1' }));
-    const useCase = new CreateSearchProfileUseCase(repository, userRepository);
+    const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
       userId: 'user-1',
@@ -59,7 +64,8 @@ describe('CreateSearchProfileUseCase', () => {
   it('fails when the caller has no matching user', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
-    const useCase = new CreateSearchProfileUseCase(repository, userRepository);
+    const unitOfWork = new FakeUnitOfWork();
+    const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
       userId: 'missing-user',
@@ -74,9 +80,10 @@ describe('CreateSearchProfileUseCase', () => {
   it('fails once the user already has an active or paused search profile at the free-tier limit', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
+    const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1', searchProfileLimit: 1 }));
     await repository.save(buildSearchProfile({ userId: 'user-1' }));
-    const useCase = new CreateSearchProfileUseCase(repository, userRepository);
+    const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
       userId: 'user-1',
@@ -92,6 +99,7 @@ describe('CreateSearchProfileUseCase', () => {
   it('does not count archived search profiles against the limit', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
+    const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1', searchProfileLimit: 1 }));
     const archivedProfile = buildSearchProfile({ userId: 'user-1' });
     const archivedResult = archivedProfile.archive();
@@ -101,7 +109,7 @@ describe('CreateSearchProfileUseCase', () => {
     }
 
     await repository.save(archivedResult.value);
-    const useCase = new CreateSearchProfileUseCase(repository, userRepository);
+    const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
       userId: 'user-1',
@@ -116,9 +124,10 @@ describe('CreateSearchProfileUseCase', () => {
   it('allows creating a second profile once the admin raises the limit', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
+    const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1', searchProfileLimit: 2 }));
     await repository.save(buildSearchProfile({ userId: 'user-1' }));
-    const useCase = new CreateSearchProfileUseCase(repository, userRepository);
+    const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
       userId: 'user-1',
