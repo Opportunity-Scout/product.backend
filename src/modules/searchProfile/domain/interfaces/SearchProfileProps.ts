@@ -11,4 +11,5 @@ export interface SearchProfileProps {
   createdAt: Date;
   updatedAt: Date;
   lastMatchedAt: Date | null;
+  version: number;
 }

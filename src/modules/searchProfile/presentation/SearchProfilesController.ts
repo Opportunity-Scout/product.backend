@@ -12,11 +12,13 @@ import {
   Patch,
   Post,
   Query,
+  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -48,6 +50,7 @@ import { ListSearchProfilesAdminQueryDto } from './dto/ListSearchProfilesAdminQu
 import { SearchProfileResponseDto } from './dto/SearchProfileResponseDto';
 import { ListSearchProfilesAdminResponseDto } from './dto/ListSearchProfilesAdminResponseDto';
 import { toSearchProfileResponse } from './searchProfilePresenter';
+import { SearchProfileUpdateExceptionFilter } from './SearchProfileUpdateExceptionFilter';
 
 @ApiTags('search-profiles')
 @ApiBearerAuth()
@@ -183,12 +186,16 @@ export class SearchProfilesController {
   }
 
   @Post(':id/pause')
+  @UseFilters(SearchProfileUpdateExceptionFilter)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Pause a Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ description: 'Search Profile paused', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is not active' })
   @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
+  @ApiConflictResponse({
+    description: 'Search Profile was modified by another request since it was read; re-read and retry',
+  })
   async pause(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     const result = await this.pauseSearchProfileUseCase.execute({ id, userId });
 
@@ -204,12 +211,16 @@ export class SearchProfilesController {
   }
 
   @Post(':id/activate')
+  @UseFilters(SearchProfileUpdateExceptionFilter)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Activate a paused Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ description: 'Search Profile activated', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is not paused' })
   @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
+  @ApiConflictResponse({
+    description: 'Search Profile was modified by another request since it was read; re-read and retry',
+  })
   async activate(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     const result = await this.activateSearchProfileUseCase.execute({ id, userId });
 
@@ -225,12 +236,16 @@ export class SearchProfilesController {
   }
 
   @Post(':id/archive')
+  @UseFilters(SearchProfileUpdateExceptionFilter)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Archive a Search Profile' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ description: 'Search Profile archived', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, or the Search Profile is already archived' })
   @ApiNotFoundResponse({ description: 'No Search Profile with this id' })
+  @ApiConflictResponse({
+    description: 'Search Profile was modified by another request since it was read; re-read and retry',
+  })
   async archive(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     const result = await this.archiveSearchProfileUseCase.execute({ id, userId });
 
@@ -246,12 +261,16 @@ export class SearchProfilesController {
   }
 
   @Patch(':id')
+  @UseFilters(SearchProfileUpdateExceptionFilter)
   @ApiOperation({ summary: 'Update a Search Profile (owner or admin)' })
   @ApiParam({ name: 'id', format: 'uuid' })
   @ApiOkResponse({ description: 'Search Profile updated', type: SearchProfileResponseDto })
   @ApiBadRequestResponse({ description: 'Malformed id, invalid name, or invalid preferences' })
   @ApiNotFoundResponse({
     description: 'No Search Profile with this id, or the caller is neither its owner nor an admin',
+  })
+  @ApiConflictResponse({
+    description: 'Search Profile was modified by another request since it was read; re-read and retry',
   })
   async update(
     @CurrentUser('id') callerId: string,

@@ -5,7 +5,12 @@ import { FindManySearchProfilesResult } from './interfaces/FindManySearchProfile
 export const SEARCH_PROFILE_REPOSITORY = Symbol('SEARCH_PROFILE_REPOSITORY');
 
 export interface SearchProfileRepository {
-  save(searchProfile: SearchProfile): Promise<void>;
+  create(searchProfile: SearchProfile): Promise<void>;
+  /**
+   * Returns the profile as persisted, with its incremented version.
+   * Throws SearchProfileConcurrentModificationError if the row changed since it was read, SearchProfileNotFoundError if it was deleted.
+   */
+  update(searchProfile: SearchProfile): Promise<SearchProfile>;
   findById(id: string): Promise<SearchProfile | null>;
   findAllByUserId(userId: string): Promise<SearchProfile[]>;
   deleteById(id: string): Promise<void>;

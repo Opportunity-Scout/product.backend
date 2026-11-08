@@ -390,6 +390,9 @@ verified directly rather than assumed, since docs/training data lag reality:
   — a bare `DATABASE_URL` string constructor argument is no longer accepted.
   `pg` itself comes in transitively through the adapter; not a direct
   dependency of ours.
+- `prisma migrate dev` no longer runs `prisma generate` on its own — after a
+  schema change, run `npm run prisma:generate` too, or TypeScript won't see
+  the new columns (found adding `SearchProfile.version`, 2026-11-08).
 
 `PrismaService` (`src/common/persistence/PrismaService.ts`) extends
 `PrismaClient` directly (the officially-documented Nest+Prisma pattern),
@@ -514,6 +517,61 @@ signatures stay unchanged. Rules:
   every other request would hit the ~2 s connection timeout. The throttler
   (60 req/min per IP) softens this today; revisit together with the point
   above when DOU arrives.
+
+**Optimistic locking on `SearchProfile` (2026-11-08).** `PATCH` and the status
+transitions (`pause`/`activate`/`archive`) are read-modify-write: two
+concurrent requests could both read the same row and the second write would
+silently overwrite the first (lost update), or resurrect an `archived`
+profile via a racing `activate`. Closed with a `version` column:
+- `SearchProfileRepository` has `create()` (plain insert) and `update()`
+  instead of one `save()` upsert — an upsert's overwrite branch would leave a
+  write path with no version check. `update()` runs
+  `UPDATE ... WHERE id = ? AND version = ?` with `version + 1`. When no row
+  matches, it checks whether the row still exists (one extra read, on the
+  failure path only) and **throws** `SearchProfileConcurrentModificationError`
+  (→ 409) if it does, `SearchProfileNotFoundError` (→ 404) if it was deleted
+  mid-request — a deleted profile can't be fixed by re-reading and retrying,
+  so 409's "retry" signal would be misleading there.
+- Every domain mutation copies `...this.props`, so the modified entity carries
+  the version it was read with — that's the value `update()` checks.
+- `update()` **returns the persisted entity** (`withVersion(version + 1)`),
+  and use cases return that, not the pre-write entity — otherwise every
+  response would carry a version one behind the database, and a future ETag
+  built from it would make the client's next request fail with 409 every
+  time.
+- Optimistic, not pessimistic: conflicts on one profile's edit are rare, and
+  holding a row lock across a request isn't justified for that. Contrast with
+  the free-tier limit, where `FOR UPDATE` on the user row fits (see Unit of
+  Work above).
+- The client never sends a version; the server only guards its own
+  read→write window. A client-supplied `If-Match`/ETag (guarding "overwrote a
+  change I never saw") is deferred until a real editing UI (Mini App) exists.
+- **Revisit when DOU arrives:** `lastMatchedAt` is system-written (Matching
+  Engine) but shares the row and the version with user-edited
+  `name`/`preferences`. If matching writes it through `update()`, a user's
+  edit starts getting 409s nobody caused, and matching fails on user edits.
+  Options then: write `lastMatchedAt` with its own query outside the version
+  check, or retry on the matching side.
+- **Why a throw, not a `Result`:** a version conflict isn't a business rule,
+  it's two requests colliding in time, detected by the database — the same
+  category every ORM puts it in (TypeORM, MikroORM, Hibernate, EF all throw).
+  A throw also rolls back an enclosing `UnitOfWork.run()`, which a returned
+  `Result.fail` currently doesn't.
+- **HTTP 409 Conflict** (RFC 9110 §15.5.10), via
+  `SearchProfileUpdateExceptionFilter`, registered with `@UseFilters` on the
+  four mutating routes only, not the whole controller — it maps both errors
+  `update()` throws (409 and 404), and class-level registration would also
+  catch a `SearchProfileNotFoundError` thrown from any other route. Not 412: that's for a precondition the *client*
+  sent (`If-Match`), which we don't have. Documented with
+  `@ApiConflictResponse` on the four mutating routes. A single, app-wide
+  error→HTTP mapping is tracked separately (ClickUp 1amndjnn2fj); this filter
+  should fold into it.
+- Proven by `searchProfilesController.spec.ts` → "with a widened race window":
+  `DelayedSearchProfileAdapter` also delays `findById()`, two concurrent
+  `PATCH`es → statuses `[200, 409]`, only the winner's change persisted,
+  `version` 1. Verified against a false positive: with the `version`
+  condition dropped from `update()`'s `WHERE`, both requests return 200 and
+  the test fails.
 
 ## Architectural priority
 
@@ -1047,7 +1105,7 @@ they need.
   (see "Planned auth model" under Security). Can have multiple Search
   Profiles, but see the free-tier limit below.
 - **SearchProfile** — the user's intent. Fields: `id, userId, name, description,
-  status, preferences, createdAt, updatedAt, lastMatchedAt`.
+  status, preferences, createdAt, updatedAt, lastMatchedAt, version`.
 - **Opportunity** — normalized, source-independent possibility. Fields:
   `id, sourceId, externalId, title, description, company, url, country, city, remote,
   relocation, salary, skills, seniority, employmentType, publishedAt, updatedAtSource,
@@ -1456,6 +1514,10 @@ added:
 - **Expected domain failures** (`Result.fail` — invalid `SearchPreferences`, duplicate
   profile, etc.) are normal business flow, not errors — they don't get error-level
   logs or alerts, at most a debug log or a metric counter.
+- **Concurrency conflicts** (e.g. `SearchProfileConcurrentModificationError`)
+  are thrown, not returned as `Result.fail` — see "Persistence" → Optimistic
+  locking. Expected and rare, so no error-level alerting either; a counter is
+  enough to notice if they ever become frequent.
 - **Unexpected/infrastructure failures** (DB unreachable, a source adapter
   throwing, an uncaught exception) are the actual target for error logs and,
   later, alerts (e.g. Sentry, a Telegram channel for on-call) — that distinction

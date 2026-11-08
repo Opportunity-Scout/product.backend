@@ -21,6 +21,7 @@ describe('SearchProfile', () => {
     expect(result.value.status).toBe('active');
     expect(result.value.name).toBe('Backend Prague');
     expect(result.value.lastMatchedAt).toBeNull();
+    expect(result.value.version).toBe(0);
   });
 
   it('rejects a blank name', () => {
@@ -79,6 +80,7 @@ describe('SearchProfile', () => {
       createdAt: now,
       updatedAt: now,
       lastMatchedAt: now,
+      version: 3,
     };
 
     const profile = SearchProfile.reconstitute(props);
@@ -92,6 +94,7 @@ describe('SearchProfile', () => {
     expect(profile.createdAt).toBe(now);
     expect(profile.updatedAt).toBe(now);
     expect(profile.lastMatchedAt).toBe(now);
+    expect(profile.version).toBe(3);
   });
 
   it('pauses an active search profile', () => {
@@ -122,6 +125,7 @@ describe('SearchProfile', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastMatchedAt: null,
+      version: 0,
     });
 
     const result = profile.pause();
@@ -140,6 +144,7 @@ describe('SearchProfile', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastMatchedAt: null,
+      version: 0,
     });
 
     const result = profile.pause();
@@ -158,6 +163,7 @@ describe('SearchProfile', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastMatchedAt: null,
+      version: 0,
     });
 
     const result = profile.activate();
@@ -193,6 +199,7 @@ describe('SearchProfile', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastMatchedAt: null,
+      version: 0,
     });
 
     const result = profile.activate();
@@ -228,6 +235,7 @@ describe('SearchProfile', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastMatchedAt: null,
+      version: 0,
     });
 
     const result = profile.archive();
@@ -247,6 +255,7 @@ describe('SearchProfile', () => {
       createdAt: new Date(),
       updatedAt: new Date(),
       lastMatchedAt: null,
+      version: 0,
     });
 
     const result = profile.archive();
@@ -394,5 +403,42 @@ describe('SearchProfile', () => {
 
     expect(result.isSuccess).toBe(true);
     expect(result.value.preferences).toBe(newPreferencesResult.value);
+  });
+
+  it('returns a copy with the given version, leaving the original untouched', () => {
+    const created = SearchProfile.create({ userId: 'user-1', name: 'Backend Prague', preferences: validPreferences() });
+
+    if (created.isFailure) {
+      throw created.error;
+    }
+
+    const bumped = created.value.withVersion(1);
+
+    expect(bumped.version).toBe(1);
+    expect(created.value.version).toBe(0);
+    expect(bumped.name).toBe('Backend Prague');
+  });
+
+  it('keeps the version it was read with through status changes and detail updates', () => {
+    const profile = SearchProfile.reconstitute({
+      id: 'existing-id',
+      userId: 'user-1',
+      name: 'Backend Prague',
+      description: null,
+      status: 'active',
+      preferences: validPreferences(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastMatchedAt: null,
+      version: 7,
+    });
+
+    const paused = profile.pause();
+    const updated = profile.updateDetails({ name: 'Backend Brno' });
+
+    expect(paused.isSuccess).toBe(true);
+    expect(updated.isSuccess).toBe(true);
+    expect(paused.value.version).toBe(7);
+    expect(updated.value.version).toBe(7);
   });
 });

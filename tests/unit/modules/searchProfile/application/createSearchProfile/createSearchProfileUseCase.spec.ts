@@ -82,7 +82,7 @@ describe('CreateSearchProfileUseCase', () => {
     const userRepository = new FakeUserRepository();
     const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1', searchProfileLimit: 1 }));
-    await repository.save(buildSearchProfile({ userId: 'user-1' }));
+    await repository.create(buildSearchProfile({ userId: 'user-1' }));
     const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
@@ -108,7 +108,7 @@ describe('CreateSearchProfileUseCase', () => {
       throw archivedResult.error;
     }
 
-    await repository.save(archivedResult.value);
+    await repository.create(archivedResult.value);
     const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({
@@ -126,7 +126,7 @@ describe('CreateSearchProfileUseCase', () => {
     const userRepository = new FakeUserRepository();
     const unitOfWork = new FakeUnitOfWork();
     userRepository.saved.push(buildUser({ id: 'user-1', searchProfileLimit: 2 }));
-    await repository.save(buildSearchProfile({ userId: 'user-1' }));
+    await repository.create(buildSearchProfile({ userId: 'user-1' }));
     const useCase = new CreateSearchProfileUseCase(repository, userRepository, unitOfWork);
 
     const result = await useCase.execute({

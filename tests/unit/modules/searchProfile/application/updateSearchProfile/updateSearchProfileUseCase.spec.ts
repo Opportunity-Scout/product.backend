@@ -11,7 +11,7 @@ describe('UpdateSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: 'user-1', name: 'Senior Backend Prague' });
     const persisted = await repository.findById(profile.id);
@@ -19,13 +19,14 @@ describe('UpdateSearchProfileUseCase', () => {
     expect(result.isSuccess).toBe(true);
     expect(result.value.name).toBe('Senior Backend Prague');
     expect(persisted?.name).toBe('Senior Backend Prague');
+    expect(result.value.version).toBe(persisted?.version);
   });
 
   it('leaves the name unchanged when omitted', async () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
 
     const result = await useCase.execute({
@@ -42,7 +43,7 @@ describe('UpdateSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1', description: 'Remote-friendly backend roles' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: 'user-1', description: null });
 
@@ -54,7 +55,7 @@ describe('UpdateSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
 
     const result = await useCase.execute({
@@ -72,7 +73,7 @@ describe('UpdateSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
 
     const result = await useCase.execute({
@@ -91,7 +92,7 @@ describe('UpdateSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: 'user-1', name: '   ' });
     const persisted = await repository.findById(profile.id);
@@ -113,7 +114,7 @@ describe('UpdateSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: 'user-2', name: 'Senior Backend Prague' });
 
@@ -127,7 +128,7 @@ describe('UpdateSearchProfileUseCase', () => {
     const admin = buildUser({ id: 'admin-user', role: 'admin' });
     userRepository.saved.push(admin);
     const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new UpdateSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: admin.id, name: 'Senior Backend Prague' });
 

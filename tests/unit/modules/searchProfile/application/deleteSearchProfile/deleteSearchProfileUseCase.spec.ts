@@ -11,7 +11,7 @@ describe('DeleteSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new DeleteSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: 'user-1' });
 
@@ -33,7 +33,7 @@ describe('DeleteSearchProfileUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const userRepository = new FakeUserRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new DeleteSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: 'user-2' });
 
@@ -48,7 +48,7 @@ describe('DeleteSearchProfileUseCase', () => {
     const admin = buildUser({ id: 'admin-user', role: 'admin' });
     userRepository.saved.push(admin);
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new DeleteSearchProfileUseCase(repository, new UserAccessService(userRepository));
     const result = await useCase.execute({ id: profile.id, callerId: admin.id });
 

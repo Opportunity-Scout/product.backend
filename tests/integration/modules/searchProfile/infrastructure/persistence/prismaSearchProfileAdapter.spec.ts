@@ -5,6 +5,8 @@ import {
   SEARCH_PROFILE_REPOSITORY,
   SearchProfileRepository,
 } from '@app/modules/searchProfile/application/ports/SearchProfileRepository';
+import { SearchProfileConcurrentModificationError } from '@app/modules/searchProfile/application/errors/SearchProfileConcurrentModificationError';
+import { SearchProfileNotFoundError } from '@app/modules/searchProfile/application/errors/SearchProfileNotFoundError';
 import { SearchPreferences } from '@app/modules/searchProfile/domain/SearchPreferences';
 import { SearchProfile } from '@app/modules/searchProfile/domain/SearchProfile';
 
@@ -12,7 +14,7 @@ describe('PrismaSearchProfileAdapter (integration)', () => {
   let moduleRef: TestingModule;
   let repository: SearchProfileRepository;
   let prismaService: PrismaService;
-  let createdSearchProfileId: string | undefined;
+  const createdSearchProfileIds: string[] = [];
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -22,14 +24,14 @@ describe('PrismaSearchProfileAdapter (integration)', () => {
   });
 
   afterAll(async () => {
-    if (createdSearchProfileId) {
-      await prismaService.searchProfile.delete({ where: { id: createdSearchProfileId } });
+    for (const id of createdSearchProfileIds) {
+      await prismaService.searchProfile.delete({ where: { id } });
     }
 
     await moduleRef.close();
   });
 
-  it('reconstructs an equivalent search profile after a real save/findById round trip', async () => {
+  it('reconstructs an equivalent search profile after a real create/findById round trip', async () => {
     const preferencesResult = SearchPreferences.create({
       location: { remote: false, countries: ['CZ'], relocation: true },
     });
@@ -50,9 +52,9 @@ describe('PrismaSearchProfileAdapter (integration)', () => {
     }
 
     const profile = profileResult.value;
-    createdSearchProfileId = profile.id;
+    createdSearchProfileIds.push(profile.id);
 
-    await repository.save(profile);
+    await repository.create(profile);
     const found = await repository.findById(profile.id);
 
     expect(found).not.toBeNull();
@@ -65,6 +67,58 @@ describe('PrismaSearchProfileAdapter (integration)', () => {
     expect(found?.preferences.location.remote).toBe(false);
     expect(found?.preferences.location.countries).toEqual(['CZ']);
     expect(found?.preferences.location.relocation).toBe(true);
+  });
+
+  it('increments the version on update and rejects a second update made from the same stale read', async () => {
+    const preferencesResult = SearchPreferences.create({ location: { remote: true } });
+
+    if (preferencesResult.isFailure) {
+      throw preferencesResult.error;
+    }
+
+    const profileResult = SearchProfile.create({
+      userId: 'integration-user-3',
+      name: 'Backend Prague',
+      preferences: preferencesResult.value,
+    });
+
+    if (profileResult.isFailure) {
+      throw profileResult.error;
+    }
+
+    const staleRead = profileResult.value;
+    createdSearchProfileIds.push(staleRead.id);
+    await repository.create(staleRead);
+    const returnedByUpdate = await repository.update(staleRead);
+    const afterFirstUpdate = await repository.findById(staleRead.id);
+
+    expect(afterFirstUpdate?.version).toBe(1);
+    expect(returnedByUpdate.version).toBe(1);
+    await expect(repository.update(staleRead)).rejects.toBeInstanceOf(SearchProfileConcurrentModificationError);
+  });
+
+  it('reports not found, not a conflict, when the row was deleted after it was read', async () => {
+    const preferencesResult = SearchPreferences.create({ location: { remote: true } });
+
+    if (preferencesResult.isFailure) {
+      throw preferencesResult.error;
+    }
+
+    const profileResult = SearchProfile.create({
+      userId: 'integration-user-4',
+      name: 'Backend Prague',
+      preferences: preferencesResult.value,
+    });
+
+    if (profileResult.isFailure) {
+      throw profileResult.error;
+    }
+
+    const readBeforeDelete = profileResult.value;
+    await repository.create(readBeforeDelete);
+    await repository.deleteById(readBeforeDelete.id);
+
+    await expect(repository.update(readBeforeDelete)).rejects.toBeInstanceOf(SearchProfileNotFoundError);
   });
 
   it('returns null when no row exists for the given id', async () => {

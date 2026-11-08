@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaTransactionContext } from '@app/common/persistence/PrismaTransactionContext';
 import { SearchProfile } from '../../domain/SearchProfile';
 import { SearchProfileRepository } from '../../application/ports/SearchProfileRepository';
+import { SearchProfileConcurrentModificationError } from '../../application/errors/SearchProfileConcurrentModificationError';
+import { SearchProfileNotFoundError } from '../../application/errors/SearchProfileNotFoundError';
 import { FindManySearchProfilesParams } from '../../application/ports/interfaces/FindManySearchProfilesParams';
 import { FindManySearchProfilesResult } from '../../application/ports/interfaces/FindManySearchProfilesResult';
 import { prismaSearchProfileMapper } from './helpers/prismaSearchProfileMapperHelper';
@@ -11,32 +13,49 @@ import { prismaSearchProfileMapper } from './helpers/prismaSearchProfileMapperHe
 export class PrismaSearchProfileAdapter implements SearchProfileRepository {
   constructor(private readonly db: PrismaTransactionContext) {}
 
-  async save(searchProfile: SearchProfile): Promise<void> {
-    const preferences = prismaSearchProfileMapper.toPersistenceJson(searchProfile.preferences);
-
-    await this.db.client.searchProfile.upsert({
-      where: { id: searchProfile.id },
-      create: {
+  async create(searchProfile: SearchProfile): Promise<void> {
+    await this.db.client.searchProfile.create({
+      data: {
         id: searchProfile.id,
         userId: searchProfile.userId,
         name: searchProfile.name,
         description: searchProfile.description,
         status: searchProfile.status,
-        preferences,
+        preferences: prismaSearchProfileMapper.toPersistenceJson(searchProfile.preferences),
         createdAt: searchProfile.createdAt,
         updatedAt: searchProfile.updatedAt,
         lastMatchedAt: searchProfile.lastMatchedAt,
+        version: searchProfile.version,
       },
-      update: {
-        userId: searchProfile.userId,
+    });
+  }
+
+  async update(searchProfile: SearchProfile): Promise<SearchProfile> {
+    const { count } = await this.db.client.searchProfile.updateMany({
+      where: { id: searchProfile.id, version: searchProfile.version },
+      data: {
         name: searchProfile.name,
         description: searchProfile.description,
         status: searchProfile.status,
-        preferences,
+        preferences: prismaSearchProfileMapper.toPersistenceJson(searchProfile.preferences),
         updatedAt: searchProfile.updatedAt,
         lastMatchedAt: searchProfile.lastMatchedAt,
+        version: { increment: 1 },
       },
     });
+
+    if (count === 0) {
+      const stillExists = await this.db.client.searchProfile.findUnique({
+        where: { id: searchProfile.id },
+        select: { id: true },
+      });
+
+      throw stillExists
+        ? new SearchProfileConcurrentModificationError(searchProfile.id)
+        : new SearchProfileNotFoundError(searchProfile.id);
+    }
+
+    return searchProfile.withVersion(searchProfile.version + 1);
   }
 
   async findById(id: string): Promise<SearchProfile | null> {

@@ -28,8 +28,6 @@ export class PauseSearchProfileUseCase {
       return Result.fail(pausedResult.error);
     }
 
-    await this.searchProfileRepository.save(pausedResult.value);
-
-    return Result.ok(pausedResult.value);
+    return Result.ok(await this.searchProfileRepository.update(pausedResult.value));
   }
 }

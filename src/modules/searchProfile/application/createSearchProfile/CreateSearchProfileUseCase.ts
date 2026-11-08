@@ -55,7 +55,7 @@ export class CreateSearchProfileUseCase {
         return Result.fail(searchProfileResult.error);
       }
 
-      await this.searchProfileRepository.save(searchProfileResult.value);
+      await this.searchProfileRepository.create(searchProfileResult.value);
 
       return Result.ok(searchProfileResult.value);
     });

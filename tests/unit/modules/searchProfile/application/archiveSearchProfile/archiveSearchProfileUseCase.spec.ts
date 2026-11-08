@@ -7,7 +7,7 @@ describe('ArchiveSearchProfileUseCase', () => {
   it('archives an active search profile and persists it', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new ArchiveSearchProfileUseCase(repository);
     const result = await useCase.execute({ id: profile.id, userId: 'user-1' });
     const persisted = await repository.findById(profile.id);
@@ -28,7 +28,7 @@ describe('ArchiveSearchProfileUseCase', () => {
   it('fails when the search profile is already archived', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new ArchiveSearchProfileUseCase(repository);
     await useCase.execute({ id: profile.id, userId: 'user-1' });
     const result = await useCase.execute({ id: profile.id, userId: 'user-1' });
@@ -39,7 +39,7 @@ describe('ArchiveSearchProfileUseCase', () => {
   it('fails with the same not-found error when the profile belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new ArchiveSearchProfileUseCase(repository);
     const result = await useCase.execute({ id: profile.id, userId: 'user-2' });
 

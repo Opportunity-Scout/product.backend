@@ -47,8 +47,6 @@ export class UpdateSearchProfileUseCase {
       return Result.fail(updatedResult.error);
     }
 
-    await this.searchProfileRepository.save(updatedResult.value);
-
-    return Result.ok(updatedResult.value);
+    return Result.ok(await this.searchProfileRepository.update(updatedResult.value));
   }
 }

@@ -2,25 +2,63 @@ import { Prisma } from '@prisma/client';
 import { PrismaSearchProfileAdapter } from '@app/modules/searchProfile/infrastructure/persistence/PrismaSearchProfileAdapter';
 import { PrismaService } from '@app/common/persistence/PrismaService';
 import { PrismaTransactionContext } from '@app/common/persistence/PrismaTransactionContext';
+import { SearchProfileConcurrentModificationError } from '@app/modules/searchProfile/application/errors/SearchProfileConcurrentModificationError';
+import { SearchProfileNotFoundError } from '@app/modules/searchProfile/application/errors/SearchProfileNotFoundError';
 import { buildSearchProfile } from '../../../../helpers/buildSearchProfileHelper';
 import { buildFakePrismaService } from '../../../../helpers/buildFakePrismaServiceHelper';
 
 describe('PrismaSearchProfileAdapter', () => {
-  it('upserts by id, sending a full row to create and a partial row (no id/createdAt) to update', async () => {
+  it('creates a full row, including id, createdAt and the initial version', async () => {
     const fakePrisma = buildFakePrismaService();
     const adapter = new PrismaSearchProfileAdapter(
       new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
     );
     const profile = buildSearchProfile();
-    await adapter.save(profile);
-    const call = fakePrisma.searchProfile.upsert.mock.calls[0][0];
+    await adapter.create(profile);
+    const { data } = fakePrisma.searchProfile.create.mock.calls[0][0];
 
-    expect(fakePrisma.searchProfile.upsert).toHaveBeenCalledTimes(1);
-    expect(call.where).toEqual({ id: profile.id });
-    expect(call.create.id).toBe(profile.id);
-    expect(call.create.createdAt).toBe(profile.createdAt);
-    expect(call.update.id).toBeUndefined();
-    expect(call.update.createdAt).toBeUndefined();
+    expect(fakePrisma.searchProfile.create).toHaveBeenCalledTimes(1);
+    expect(data.id).toBe(profile.id);
+    expect(data.createdAt).toBe(profile.createdAt);
+    expect(data.version).toBe(0);
+  });
+
+  it('updates only when the version still matches, incrementing it, without touching id or createdAt', async () => {
+    const fakePrisma = buildFakePrismaService();
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
+    const profile = buildSearchProfile();
+    const persisted = await adapter.update(profile);
+    const { where, data } = fakePrisma.searchProfile.updateMany.mock.calls[0][0];
+
+    expect(persisted.version).toBe(profile.version + 1);
+    expect(where).toEqual({ id: profile.id, version: profile.version });
+    expect(data.version).toEqual({ increment: 1 });
+    expect(data.id).toBeUndefined();
+    expect(data.createdAt).toBeUndefined();
+  });
+
+  it('throws SearchProfileConcurrentModificationError when the row still exists but its version moved on', async () => {
+    const fakePrisma = buildFakePrismaService();
+    fakePrisma.searchProfile.updateMany.mockResolvedValue({ count: 0 });
+    fakePrisma.searchProfile.findUnique.mockResolvedValue({ id: 'profile-1' });
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
+
+    await expect(adapter.update(buildSearchProfile())).rejects.toBeInstanceOf(SearchProfileConcurrentModificationError);
+  });
+
+  it('throws SearchProfileNotFoundError when the row was deleted after it was read', async () => {
+    const fakePrisma = buildFakePrismaService();
+    fakePrisma.searchProfile.updateMany.mockResolvedValue({ count: 0 });
+    fakePrisma.searchProfile.findUnique.mockResolvedValue(null);
+    const adapter = new PrismaSearchProfileAdapter(
+      new PrismaTransactionContext(fakePrisma as unknown as PrismaService),
+    );
+
+    await expect(adapter.update(buildSearchProfile())).rejects.toBeInstanceOf(SearchProfileNotFoundError);
   });
 
   it('returns null when no row exists for the given id', async () => {
@@ -48,6 +86,7 @@ describe('PrismaSearchProfileAdapter', () => {
       createdAt: now,
       updatedAt: now,
       lastMatchedAt: null,
+      version: 4,
     });
 
     const adapter = new PrismaSearchProfileAdapter(
@@ -58,6 +97,7 @@ describe('PrismaSearchProfileAdapter', () => {
     expect(found?.id).toBe('existing-id');
     expect(found?.name).toBe('Backend Prague');
     expect(found?.preferences.location.remote).toBe(true);
+    expect(found?.version).toBe(4);
   });
 
   it('throws when the persisted preferences JSON fails domain validation', async () => {
