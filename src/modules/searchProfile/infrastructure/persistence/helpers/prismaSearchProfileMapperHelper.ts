@@ -21,6 +21,7 @@ class PrismaSearchProfileMapper {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       lastMatchedAt: row.lastMatchedAt,
+      version: row.version,
     });
   }
 

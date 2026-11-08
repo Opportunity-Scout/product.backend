@@ -28,8 +28,6 @@ export class ArchiveSearchProfileUseCase {
       return Result.fail(archivedResult.error);
     }
 
-    await this.searchProfileRepository.save(archivedResult.value);
-
-    return Result.ok(archivedResult.value);
+    return Result.ok(await this.searchProfileRepository.update(archivedResult.value));
   }
 }

@@ -7,8 +7,8 @@ describe('ListSearchProfilesUseCase', () => {
     const repository = new FakeSearchProfileRepository();
     const ownProfile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
     const otherProfile = buildSearchProfile({ userId: 'user-2', name: 'Someone else' });
-    await repository.save(ownProfile);
-    await repository.save(otherProfile);
+    await repository.create(ownProfile);
+    await repository.create(otherProfile);
     const useCase = new ListSearchProfilesUseCase(repository);
     const result = await useCase.execute({ userId: ownProfile.userId });
 

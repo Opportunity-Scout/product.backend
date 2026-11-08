@@ -84,47 +84,82 @@ describe('SearchProfilesController (integration)', () => {
       expect(persisted?.userId).toBe(userId);
       expect(persisted?.name).toBe(payload.name);
     });
+  });
 
-    describe('with a widened race window', () => {
-      let raceApp: NestExpressApplication;
+  describe('with a widened race window', () => {
+    let raceApp: NestExpressApplication;
 
-      beforeAll(async () => {
-        const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-          .overrideProvider(SEARCH_PROFILE_REPOSITORY)
-          .useFactory({
-            factory: (prisma: PrismaTransactionContext) => new DelayedSearchProfileAdapter(prisma),
-            inject: [PrismaTransactionContext],
-          })
-          .compile();
+    beforeAll(async () => {
+      const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+        .overrideProvider(SEARCH_PROFILE_REPOSITORY)
+        .useFactory({
+          factory: (prisma: PrismaTransactionContext) => new DelayedSearchProfileAdapter(prisma),
+          inject: [PrismaTransactionContext],
+        })
+        .compile();
 
-        raceApp = moduleRef.createNestApplication<NestExpressApplication>();
-        configureApp(raceApp);
-        // A listening server stops supertest from closing it per request, which resets concurrent requests.
-        await raceApp.listen(0);
-      });
+      raceApp = moduleRef.createNestApplication<NestExpressApplication>();
+      configureApp(raceApp);
+      // A listening server stops supertest from closing it per request, which resets concurrent requests.
+      await raceApp.listen(0);
+    });
 
-      afterAll(async () => {
-        await raceApp.close();
-      });
+    afterAll(async () => {
+      await raceApp.close();
+    });
 
-      it('queues concurrent creates on the user row lock so only one passes the free-tier limit', async () => {
-        const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
-        const { token, userId } = await loginAsNewUser(raceApp, verificationClient);
-        createdUserIds.push(userId);
-        const sendRequest = () =>
-          request(raceApp.getHttpServer())
-            .post('/search-profiles')
-            .set('Authorization', `Bearer ${token}`)
-            .send(payload);
+    it('queues concurrent creates on the user row lock so only one passes the free-tier limit', async () => {
+      const payload = { name: 'Backend Prague', preferences: { location: { remote: true } } };
+      const { token, userId } = await loginAsNewUser(raceApp, verificationClient);
+      createdUserIds.push(userId);
+      const sendRequest = () =>
+        request(raceApp.getHttpServer()).post('/search-profiles').set('Authorization', `Bearer ${token}`).send(payload);
 
-        const responses = await Promise.all(Array.from({ length: 5 }, () => sendRequest()));
-        const statuses = responses.map((response) => response.status).sort();
-        const persisted = await verificationClient.searchProfile.findMany({ where: { userId } });
-        createdSearchProfileIds.push(...persisted.map((profile) => profile.id));
+      const responses = await Promise.all(Array.from({ length: 5 }, () => sendRequest()));
+      const statuses = responses.map((response) => response.status).sort();
+      const persisted = await verificationClient.searchProfile.findMany({ where: { userId } });
+      createdSearchProfileIds.push(...persisted.map((profile) => profile.id));
 
-        expect(persisted).toHaveLength(1);
-        expect(statuses).toEqual([201, 400, 400, 400, 400]);
-      });
+      expect(persisted).toHaveLength(1);
+      expect(statuses).toEqual([201, 400, 400, 400, 400]);
+    });
+
+    it('rejects the slower of two concurrent PATCHes with 409 instead of silently losing its change', async () => {
+      const { token, userId } = await loginAsNewUser(raceApp, verificationClient);
+      createdUserIds.push(userId);
+
+      const createResponse = await request(raceApp.getHttpServer())
+        .post('/search-profiles')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name: 'Node jobs', description: 'Kyiv', preferences: { location: { remote: true } } });
+
+      if (createResponse.status !== 201) {
+        throw new Error(`Setup failed: POST /search-profiles returned ${createResponse.status}`);
+      }
+
+      const profileId = (createResponse.body as { id: string }).id;
+      createdSearchProfileIds.push(profileId);
+      const sendPatch = (body: { name?: string; description?: string }) =>
+        request(raceApp.getHttpServer())
+          .patch(`/search-profiles/${profileId}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send(body);
+
+      const [renameResponse, redescribeResponse] = await Promise.all([
+        sendPatch({ name: 'Backend jobs' }),
+        sendPatch({ description: 'Remote' }),
+      ]);
+
+      const statuses = [renameResponse.status, redescribeResponse.status].sort();
+      const persisted = await verificationClient.searchProfile.findUniqueOrThrow({ where: { id: profileId } });
+      const onlyWinnerApplied =
+        renameResponse.status === 200
+          ? persisted.name === 'Backend jobs' && persisted.description === 'Kyiv'
+          : persisted.name === 'Node jobs' && persisted.description === 'Remote';
+
+      expect(statuses).toEqual([200, 409]);
+      expect(onlyWinnerApplied).toBe(true);
+      expect(persisted.version).toBe(1);
     });
   });
 

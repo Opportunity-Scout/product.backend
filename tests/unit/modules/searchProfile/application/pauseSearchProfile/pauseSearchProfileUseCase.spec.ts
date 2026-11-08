@@ -7,7 +7,7 @@ describe('PauseSearchProfileUseCase', () => {
   it('pauses an active search profile and persists it', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new PauseSearchProfileUseCase(repository);
     const result = await useCase.execute({ id: profile.id, userId: 'user-1' });
     const persisted = await repository.findById(profile.id);
@@ -28,7 +28,7 @@ describe('PauseSearchProfileUseCase', () => {
   it('fails when the search profile is already paused', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new PauseSearchProfileUseCase(repository);
     await useCase.execute({ id: profile.id, userId: 'user-1' });
     const result = await useCase.execute({ id: profile.id, userId: 'user-1' });
@@ -39,7 +39,7 @@ describe('PauseSearchProfileUseCase', () => {
   it('fails with the same not-found error when the profile belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const useCase = new PauseSearchProfileUseCase(repository);
     const result = await useCase.execute({ id: profile.id, userId: 'user-2' });
 

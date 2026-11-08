@@ -28,8 +28,6 @@ export class ActivateSearchProfileUseCase {
       return Result.fail(activatedResult.error);
     }
 
-    await this.searchProfileRepository.save(activatedResult.value);
-
-    return Result.ok(activatedResult.value);
+    return Result.ok(await this.searchProfileRepository.update(activatedResult.value));
   }
 }

@@ -57,7 +57,7 @@ describe('SearchProfilesController', () => {
   it('returns the presented search profile when found by id', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     const response = await controller.findById('user-1', profile.id);
@@ -75,7 +75,7 @@ describe('SearchProfilesController', () => {
   it('responds with 404 when the search profile belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(controller.findById('user-2', profile.id)).rejects.toThrow(NotFoundException);
@@ -87,7 +87,7 @@ describe('SearchProfilesController', () => {
     const admin = buildUser({ id: 'admin-user', role: 'admin' });
     userRepository.saved.push(admin);
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository, userRepository);
     const response = await controller.findById(admin.id, profile.id);
 
@@ -96,8 +96,8 @@ describe('SearchProfilesController', () => {
 
   it('returns a paginated page of search profiles for the admin list endpoint', async () => {
     const repository = new FakeSearchProfileRepository();
-    await repository.save(buildSearchProfile({ userId: 'user-1' }));
-    await repository.save(buildSearchProfile({ userId: 'user-2' }));
+    await repository.create(buildSearchProfile({ userId: 'user-1' }));
+    await repository.create(buildSearchProfile({ userId: 'user-2' }));
     const controller = buildSearchProfilesController(repository);
     const response = await controller.listAdmin({ limit: 1, offset: 0 });
 
@@ -110,7 +110,7 @@ describe('SearchProfilesController', () => {
   it('deletes the search profile when the caller owns it', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
     await controller.deleteSearchProfile('user-1', profile.id);
 
@@ -120,7 +120,7 @@ describe('SearchProfilesController', () => {
   it('responds with 404 when deleting a search profile that belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(controller.deleteSearchProfile('user-2', profile.id)).rejects.toThrow(NotFoundException);
@@ -132,7 +132,7 @@ describe('SearchProfilesController', () => {
     const admin = buildUser({ id: 'admin-user', role: 'admin' });
     userRepository.saved.push(admin);
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository, userRepository);
     await controller.deleteSearchProfile(admin.id, profile.id);
 
@@ -143,8 +143,8 @@ describe('SearchProfilesController', () => {
     const repository = new FakeSearchProfileRepository();
     const ownProfile = buildSearchProfile({ userId: 'user-1' });
     const otherProfile = buildSearchProfile({ userId: 'user-2' });
-    await repository.save(ownProfile);
-    await repository.save(otherProfile);
+    await repository.create(ownProfile);
+    await repository.create(otherProfile);
     const controller = buildSearchProfilesController(repository);
     const response = await controller.list('user-1');
 
@@ -162,7 +162,7 @@ describe('SearchProfilesController', () => {
   it('returns the presented search profile after pausing it', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
     const response = await controller.pause('user-1', profile.id);
 
@@ -178,7 +178,7 @@ describe('SearchProfilesController', () => {
   it('responds with 400 when pausing a search profile that is not active', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
     await controller.pause('user-1', profile.id);
 
@@ -188,7 +188,7 @@ describe('SearchProfilesController', () => {
   it('responds with 404 when pausing a search profile that belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(controller.pause('user-2', profile.id)).rejects.toThrow(NotFoundException);
@@ -197,7 +197,7 @@ describe('SearchProfilesController', () => {
   it('returns the presented search profile after activating it', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
     await controller.pause('user-1', profile.id);
     const response = await controller.activate('user-1', profile.id);
@@ -214,7 +214,7 @@ describe('SearchProfilesController', () => {
   it('responds with 400 when activating a search profile that is not paused', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(controller.activate('user-1', profile.id)).rejects.toThrow(BadRequestException);
@@ -223,7 +223,7 @@ describe('SearchProfilesController', () => {
   it('responds with 404 when activating a search profile that belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(controller.activate('user-2', profile.id)).rejects.toThrow(NotFoundException);
@@ -232,7 +232,7 @@ describe('SearchProfilesController', () => {
   it('returns the presented search profile after archiving it', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
     const response = await controller.archive('user-1', profile.id);
 
@@ -248,7 +248,7 @@ describe('SearchProfilesController', () => {
   it('responds with 400 when archiving a search profile that is already archived', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
     await controller.archive('user-1', profile.id);
 
@@ -258,7 +258,7 @@ describe('SearchProfilesController', () => {
   it('responds with 404 when archiving a search profile that belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(controller.archive('user-2', profile.id)).rejects.toThrow(NotFoundException);
@@ -267,7 +267,7 @@ describe('SearchProfilesController', () => {
   it('returns the presented search profile after updating its name', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1', name: 'Backend Prague' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
     const response = await controller.update('user-1', profile.id, { name: 'Senior Backend Prague' });
 
@@ -285,7 +285,7 @@ describe('SearchProfilesController', () => {
   it('responds with 400 when updating to invalid preferences', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(
@@ -296,7 +296,7 @@ describe('SearchProfilesController', () => {
   it('responds with 404 when updating a search profile that belongs to a different user', async () => {
     const repository = new FakeSearchProfileRepository();
     const profile = buildSearchProfile({ userId: 'user-1' });
-    await repository.save(profile);
+    await repository.create(profile);
     const controller = buildSearchProfilesController(repository);
 
     await expect(controller.update('user-2', profile.id, { name: 'Senior Backend Prague' })).rejects.toThrow(

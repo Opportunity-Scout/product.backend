@@ -1,21 +1,34 @@
 import { SearchProfileRepository } from '@app/modules/searchProfile/application/ports/SearchProfileRepository';
 import { FindManySearchProfilesParams } from '@app/modules/searchProfile/application/ports/interfaces/FindManySearchProfilesParams';
 import { FindManySearchProfilesResult } from '@app/modules/searchProfile/application/ports/interfaces/FindManySearchProfilesResult';
+import { SearchProfileConcurrentModificationError } from '@app/modules/searchProfile/application/errors/SearchProfileConcurrentModificationError';
+import { SearchProfileNotFoundError } from '@app/modules/searchProfile/application/errors/SearchProfileNotFoundError';
 import { SearchProfile } from '@app/modules/searchProfile/domain/SearchProfile';
 
 export class FakeSearchProfileRepository implements SearchProfileRepository {
   public readonly saved: SearchProfile[] = [];
 
-  save(searchProfile: SearchProfile): Promise<void> {
+  create(searchProfile: SearchProfile): Promise<void> {
+    this.saved.push(searchProfile);
+
+    return Promise.resolve();
+  }
+
+  update(searchProfile: SearchProfile): Promise<SearchProfile> {
     const index = this.saved.findIndex((profile) => profile.id === searchProfile.id);
 
     if (index === -1) {
-      this.saved.push(searchProfile);
-    } else {
-      this.saved[index] = searchProfile;
+      return Promise.reject(new SearchProfileNotFoundError(searchProfile.id));
     }
 
-    return Promise.resolve();
+    if (this.saved[index].version !== searchProfile.version) {
+      return Promise.reject(new SearchProfileConcurrentModificationError(searchProfile.id));
+    }
+
+    const persisted = searchProfile.withVersion(searchProfile.version + 1);
+    this.saved[index] = persisted;
+
+    return Promise.resolve(persisted);
   }
 
   findById(id: string): Promise<SearchProfile | null> {

@@ -33,6 +33,7 @@ export class SearchProfile {
         createdAt: now,
         updatedAt: now,
         lastMatchedAt: null,
+        version: 0,
       }),
     );
   }
@@ -89,6 +90,10 @@ export class SearchProfile {
     );
   }
 
+  withVersion(version: number): SearchProfile {
+    return new SearchProfile({ ...this.props, version });
+  }
+
   get id(): string {
     return this.props.id;
   }
@@ -123,5 +128,9 @@ export class SearchProfile {
 
   get lastMatchedAt(): Date | null {
     return this.props.lastMatchedAt;
+  }
+
+  get version(): number {
+    return this.props.version;
   }
 }

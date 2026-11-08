@@ -3,7 +3,11 @@ import { UpsertArgs } from './UpsertArgs';
 export interface FakePrismaService {
   $queryRaw: jest.Mock<Promise<unknown>, [TemplateStringsArray, ...unknown[]]>;
   searchProfile: {
-    upsert: jest.Mock<Promise<unknown>, [UpsertArgs]>;
+    create: jest.Mock<Promise<unknown>, [{ data: Record<string, unknown> }]>;
+    updateMany: jest.Mock<
+      Promise<{ count: number }>,
+      [{ where: { id: string; version: number }; data: Record<string, unknown> }]
+    >;
     findUnique: jest.Mock<Promise<unknown>, [{ where: { id: string } }]>;
     findMany: jest.Mock<Promise<unknown>, [{ where: unknown; take?: number; skip?: number }]>;
     count: jest.Mock<Promise<number>, [{ where: unknown }]>;
